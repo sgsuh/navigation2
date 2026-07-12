@@ -1,0 +1,8 @@
+[submodule "third_party/rtabmap"]
+	path = third_party/rtabmap
+	url = https://github.com/sgsuh/rtabmap
+	branch = feature/2d-lidar-rgbd-camera
+[submodule "third_party/rtabmap_ros"]
+	path = third_party/rtabmap_ros
+	url = https://github.com/sgsuh/rtabmap_ros
+	branch = feature/2d-lidar-rgbd-camera
