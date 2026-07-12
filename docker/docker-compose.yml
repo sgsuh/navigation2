@@ -1,0 +1,53 @@
+# Docker Compose setup to build and develop the Nav2 workspace
+# inside a ROS 2 Jazzy container.
+#
+# It reuses the repository root Dockerfile (target: dever), which builds the
+# underlay (BehaviorTree.CPP for Jazzy) and installs all overlay dependencies.
+# The Nav2 source tree is bind-mounted; the colcon build/install/log artifacts
+# live in a named volume so nothing is written to the host workspace.
+#
+# Usage (from the repository root):
+#   docker compose -f docker/docker-compose.yml build      # build the image
+#   docker compose -f docker/docker-compose.yml up -d      # start the container
+#   docker compose -f docker/docker-compose.yml exec nav2 bash
+#
+# Convenience helper scripts are provided in this directory:
+#   docker/build.sh    docker/into.sh    docker/colcon-build.sh
+name: nav2-jazzy
+
+services:
+  nav2:
+    container_name: nav2_jazzy
+    image: nav2:jazzy
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      target: dever
+      args:
+        FROM_IMAGE: ros:jazzy
+        UNDERLAY_REPOS: underlay.jazzy.repos
+        UNDERLAY_MIXINS: release ccache lld
+        OVERLAY_MIXINS: release ccache lld
+        # Skip heavy hardware SDKs that are only exec-deps of the rtabmap_examples
+        # sample package (not needed for the integration build).
+        OVERLAY_SKIP_KEYS: slam_toolbox realsense2_camera velodyne imu_filter_madgwick
+    environment:
+      OVERLAY_WS: /opt/overlay_ws
+      UNDERLAY_WS: /opt/underlay_ws
+      OVERLAY_MIXINS: release ccache lld
+      CCACHE_DIR: /tmp/.ccache
+    working_dir: /opt/overlay_ws
+    volumes:
+      # Bind-mount the current workspace as the overlay source (live edits).
+      - ..:/opt/overlay_ws/src/navigation2:cached
+      # Keep build/install/log artifacts inside the container (named volumes).
+      - nav2_overlay:/opt/overlay_ws
+      - nav2_ccache:/tmp/.ccache
+    # Keep the container alive for interactive development.
+    command: ["sleep", "infinity"]
+    tty: true
+    stdin_open: true
+
+volumes:
+  nav2_overlay:
+  nav2_ccache:

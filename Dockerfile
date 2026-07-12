@@ -15,8 +15,11 @@ FROM $FROM_IMAGE AS cacher
 
 # clone underlay source
 ARG UNDERLAY_WS
+# Select which underlay repos file to import (e.g. underlay.jazzy.repos for Jazzy).
+# Defaults to underlay.repos to preserve the previous behavior.
+ARG UNDERLAY_REPOS=underlay.repos
 WORKDIR $UNDERLAY_WS/src
-COPY ./tools/underlay.repos ../
+COPY ./tools/${UNDERLAY_REPOS} ../underlay.repos
 RUN vcs import ./ < ../underlay.repos
 
 # copy overlay source
@@ -95,15 +98,17 @@ RUN . /opt/ros/$ROS_DISTRO/setup.sh && \
 # install overlay dependencies
 ARG OVERLAY_WS
 ENV OVERLAY_WS $OVERLAY_WS
+# rosdep keys to skip when resolving overlay dependencies. Defaults to slam_toolbox
+# to preserve previous behavior; extend it (e.g. via the compose build arg) to avoid
+# pulling debian packages for source packages that are COLCON_IGNORE'd.
+ARG OVERLAY_SKIP_KEYS="slam_toolbox"
 WORKDIR $OVERLAY_WS
 COPY --from=cacher /tmp/$OVERLAY_WS ./
 
 RUN . $UNDERLAY_WS/install/setup.sh && \
     apt-get update && rosdep install -q -y \
       --from-paths src \
-      --skip-keys " \
-        slam_toolbox \
-        "\
+      --skip-keys "$OVERLAY_SKIP_KEYS" \
       --ignore-src \
     && rm -rf /var/lib/apt/lists/*
 
