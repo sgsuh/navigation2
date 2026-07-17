@@ -65,6 +65,8 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "action/ComputePathToPose.action"
   "action/ComputePathThroughPoses.action"
   "action/DriveOnHeading.action"
+  "action/StopSlowly.action"
+  "action/EscapeInfeasibleArea.action"
   "action/SmoothPath.action"
   "action/FollowPath.action"
   "action/NavigateToPose.action"

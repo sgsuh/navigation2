@@ -28,4 +28,16 @@
 	    <description></description>
 	  </class>
 	</library>
+
+	<library path="nav2_stop_slowly_behavior">
+	  <class name="nav2_behaviors::StopSlowly" type="nav2_behaviors::StopSlowly&lt;&gt;" base_class_type="nav2_core::Behavior">
+	    <description></description>
+	  </class>
+	</library>
+
+	<library path="nav2_escape_infeasible_area_behavior">
+	  <class name="nav2_behaviors::EscapeInfeasibleArea" type="nav2_behaviors::EscapeInfeasibleArea&lt;&gt;" base_class_type="nav2_core::Behavior">
+	    <description></description>
+	  </class>
+	</library>
 </class_libraries>

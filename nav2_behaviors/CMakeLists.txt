@@ -145,6 +145,56 @@ target_link_libraries(nav2_assisted_teleop_behavior PRIVATE
   pluginlib::pluginlib
 )
 
+add_library(nav2_stop_slowly_behavior SHARED
+  plugins/stop_slowly.cpp
+)
+target_include_directories(nav2_stop_slowly_behavior
+  PUBLIC
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+    "$<INSTALL_INTERFACE:include/${PROJECT_NAME}>"
+)
+target_link_libraries(nav2_stop_slowly_behavior PUBLIC
+  ${geometry_msgs_TARGETS}
+  nav2_core::nav2_core
+  nav2_costmap_2d::nav2_costmap_2d_core
+  ${nav2_msgs_TARGETS}
+  nav2_util::nav2_util_core
+  nav2_ros_common::nav2_ros_common
+  rclcpp::rclcpp
+  rclcpp_lifecycle::rclcpp_lifecycle
+  ${std_msgs_TARGETS}
+  tf2::tf2
+  tf2_ros::tf2_ros
+)
+target_link_libraries(nav2_stop_slowly_behavior PRIVATE
+  pluginlib::pluginlib
+)
+
+add_library(nav2_escape_infeasible_area_behavior SHARED
+  plugins/escape_infeasible_area.cpp
+)
+target_include_directories(nav2_escape_infeasible_area_behavior
+  PUBLIC
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+    "$<INSTALL_INTERFACE:include/${PROJECT_NAME}>"
+)
+target_link_libraries(nav2_escape_infeasible_area_behavior PUBLIC
+  ${geometry_msgs_TARGETS}
+  nav2_core::nav2_core
+  nav2_costmap_2d::nav2_costmap_2d_core
+  ${nav2_msgs_TARGETS}
+  nav2_util::nav2_util_core
+  nav2_ros_common::nav2_ros_common
+  rclcpp::rclcpp
+  rclcpp_lifecycle::rclcpp_lifecycle
+  ${std_msgs_TARGETS}
+  tf2::tf2
+  tf2_ros::tf2_ros
+)
+target_link_libraries(nav2_escape_infeasible_area_behavior PRIVATE
+  pluginlib::pluginlib
+)
+
 pluginlib_export_plugin_description_file(nav2_core behavior_plugin.xml)
 
 # Library
@@ -186,6 +236,8 @@ install(
     nav2_assisted_teleop_behavior
     nav2_drive_on_heading_behavior
     nav2_back_up_behavior
+    nav2_stop_slowly_behavior
+    nav2_escape_infeasible_area_behavior
   EXPORT ${library_name}
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
@@ -225,6 +277,8 @@ ament_export_libraries(${library_name}
   nav2_assisted_teleop_behavior
   nav2_drive_on_heading_behavior
   nav2_back_up_behavior
+  nav2_stop_slowly_behavior
+  nav2_escape_infeasible_area_behavior
 )
 ament_export_dependencies(
   geometry_msgs

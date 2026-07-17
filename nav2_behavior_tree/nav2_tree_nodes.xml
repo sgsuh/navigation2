@@ -29,6 +29,32 @@
       <output_port name="error_msg" type="string">Drive on heading error message. See `DriveOnHeading` action message for the enumerated set of error codes.</output_port>
     </Action>
 
+    <Action ID="StopSlowly">
+      <input_port name="max_distance" type="double" default="1.5">Maximum distance to allow during deceleration (m).</input_port>
+      <input_port name="desired_deceleration" type="double" default="0.15">Desired deceleration (m/s^2).</input_port>
+      <input_port name="consider_collision" type="bool" default="true">Whether to look out for potential collision ahead and increase deceleration accordingly.</input_port>
+      <input_port name="is_recovery" type="bool" default="false">True if this action is used as a recovery.</input_port>
+      <input_port name="server_name" type="string">Action server name. If not specified, `stop_slowly` is used.</input_port>
+      <input_port name="server_timeout" type="chrono::milliseconds">Action server timeout (ms). If not provided, uses the BT Navigator's `default_server_timeout` parameter value (20 ms by default).</input_port>
+      <output_port name="error_code_id" type="uint16">Stop slowly error code. See `StopSlowly` action message for the enumerated set of error codes.</output_port>
+      <output_port name="error_msg" type="string">Stop slowly error message. See `StopSlowly` action message for the enumerated set of error codes.</output_port>
+    </Action>
+
+    <Action ID="EscapeInfeasibleArea">
+      <input_port name="min_distance" type="double" default="0.2">Minimum distance to move (m).</input_port>
+      <input_port name="max_distance" type="double" default="1.0">Maximum distance to move (m).</input_port>
+      <input_port name="speed" type="double" default="0.1">Desired speed (m/s).</input_port>
+      <input_port name="prioritize_backup" type="bool" default="true">Prioritize reverse motion when both directions are feasible.</input_port>
+      <input_port name="avoid_collision" type="bool" default="true">Whether to avoid collision while moving.</input_port>
+      <input_port name="collision_avoidance_is_failure" type="bool" default="true">Whether avoiding a collision should be treated as a failure.</input_port>
+      <input_port name="time_allowance" type="double" default="15.0">Allowed time for behavior completion (seconds).</input_port>
+      <input_port name="is_recovery" type="bool" default="true">True if this action is used as a recovery.</input_port>
+      <input_port name="server_name" type="string">Action server name. If not specified, `escape_infeasible_area` is used.</input_port>
+      <input_port name="server_timeout" type="chrono::milliseconds">Action server timeout (ms). If not provided, uses the BT Navigator's `default_server_timeout` parameter value (20 ms by default).</input_port>
+      <output_port name="error_code_id" type="uint16">Escape infeasible area error code. See `EscapeInfeasibleArea` action message for the enumerated set of error codes.</output_port>
+      <output_port name="error_msg" type="string">Escape infeasible area error message. See `EscapeInfeasibleArea` action message for the enumerated set of error codes.</output_port>
+    </Action>
+
     <Action ID="CancelControl">
       <input_port name="server_name" type="string">Action server name to cancel the controller server. If not specified, `follow_path` is used.</input_port>
       <input_port name="server_timeout" type="chrono::milliseconds">Action server timeout (ms). If not provided, uses the BT Navigator's `default_server_timeout` parameter value (20 ms by default).</input_port>
@@ -539,6 +565,10 @@
     <!-- ############################### DECORATOR NODES ############################## -->
     <Decorator ID="RateController">
       <input_port name="hz" type="double" default="10.0">Rate to throttle an action or a group of actions.</input_port>
+    </Decorator>
+
+    <Decorator ID="StrictRateController">
+      <input_port name="hz" type="double" default="10.0">Rate to strictly tick an action or a group of actions at, without continuously ticking a RUNNING child between periods.</input_port>
     </Decorator>
 
     <Decorator ID="DistanceController">

@@ -1,0 +1,23 @@
+
+#goal definition
+float32 max_distance
+float32 desired_deceleration
+std_msgs/Bool consider_collision
+---
+#result definition
+
+# Error codes
+# Note: The expected priority order of the error should match the message order
+uint16 NONE=0
+uint16 UNKNOWN=740
+uint16 TF_ERROR=741
+uint16 INVALID_INPUT=742
+
+builtin_interfaces/Duration total_elapsed_time
+uint16 error_code
+string error_msg
+---
+#feedback definition
+std_msgs/Bool avoiding_collision
+float32 velocity_command
+float32 distance_traveled

@@ -84,6 +84,12 @@ list(APPEND plugin_libs nav2_back_up_action_bt_node)
 add_library(nav2_drive_on_heading_bt_node SHARED plugins/action/drive_on_heading_action.cpp)
 list(APPEND plugin_libs nav2_drive_on_heading_bt_node)
 
+add_library(nav2_stop_slowly_action_bt_node SHARED plugins/action/stop_slowly_action.cpp)
+list(APPEND plugin_libs nav2_stop_slowly_action_bt_node)
+
+add_library(nav2_escape_infeasible_area_action_bt_node SHARED plugins/action/escape_infeasible_area_action.cpp)
+list(APPEND plugin_libs nav2_escape_infeasible_area_action_bt_node)
+
 add_library(nav2_spin_action_bt_node SHARED plugins/action/spin_action.cpp)
 list(APPEND plugin_libs nav2_spin_action_bt_node)
 
@@ -158,6 +164,9 @@ list(APPEND plugin_libs nav2_reinitialize_global_localization_service_bt_node)
 
 add_library(nav2_rate_controller_bt_node SHARED plugins/decorator/rate_controller.cpp)
 list(APPEND plugin_libs nav2_rate_controller_bt_node)
+
+add_library(nav2_strict_rate_controller_bt_node SHARED plugins/decorator/strict_rate_controller.cpp)
+list(APPEND plugin_libs nav2_strict_rate_controller_bt_node)
 
 add_library(nav2_distance_controller_bt_node SHARED plugins/decorator/distance_controller.cpp)
 list(APPEND plugin_libs nav2_distance_controller_bt_node)

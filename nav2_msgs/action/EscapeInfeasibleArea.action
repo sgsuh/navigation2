@@ -1,0 +1,30 @@
+
+#goal definition
+float32 min_distance
+float32 max_distance
+float32 speed
+std_msgs/Bool prioritize_backup
+std_msgs/Bool avoid_collision
+std_msgs/Bool collision_avoidance_is_failure
+builtin_interfaces/Duration time_allowance
+---
+#result definition
+
+# Error codes
+# Note: The expected priority order of the error should match the message order
+uint16 NONE=0
+uint16 UNKNOWN=750
+uint16 TF_ERROR=751
+uint16 INVALID_INPUT=752
+uint16 ALREADY_FREE=753
+uint16 TIMEOUT=754
+uint16 NO_ESCAPE_ROUTE=755
+uint16 COLLISION_AHEAD=756
+
+builtin_interfaces/Duration total_elapsed_time
+uint16 error_code
+string error_msg
+---
+#feedback definition
+float32 velocity_command
+float32 distance_traveled
