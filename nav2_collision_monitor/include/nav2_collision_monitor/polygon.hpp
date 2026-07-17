@@ -217,6 +217,21 @@ public:
    */
   void publish();
 
+  /**
+   * @brief Toggle between the expanded and original stop polygon.
+   * Only has an effect if "expand on stop" is enabled and this is a STOP polygon.
+   */
+  void toggleStopPolygon();
+
+  /// @brief Whether expand-on-stop is enabled for this polygon
+  bool expandOnStopEnabled() {return expand_on_stop_;}
+
+  /// @brief Whether the polygon is currently in its expanded state
+  bool expandOnStopActive() {return expansion_active_;}
+
+  /// @brief Time after the last stop to revert the polygon to its original size
+  double expandResetTimeout() {return reset_expansion_after_stop_;}
+
 private:
   bool isTriggeredInternal(int points_inside);
 
@@ -299,6 +314,12 @@ protected:
    */
   bool getPolygonFromString(std::string & poly_string, std::vector<Point> & polygon);
 
+  /**
+   * @brief Expand a polygon outward by expand_on_stop_padding_ along each vertex's sign
+   * @param polygon Polygon points to expand in place
+   */
+  void expandPolygon(std::vector<Point> & polygon);
+
   // ----- Variables -----
 
   /// @brief Collision Monitor node
@@ -317,6 +338,12 @@ protected:
   ActionType action_type_;
   /// @brief Minimum number of data readings within a zone to trigger the action
   int min_points_;
+  /// @brief Whether to expand the stop polygon on trigger. Ignored unless this is a STOP polygon
+  bool expand_on_stop_{false};
+  /// @brief Amount (m) to expand the stop polygon by when triggered
+  double expand_on_stop_padding_{0.1};
+  /// @brief Time (s) after the last stop to revert the polygon to its original size
+  double reset_expansion_after_stop_{1.0};
   /// @brief Number of consecutive hits required to trigger action
   int trigger_consecutive_points_;
   /// @brief Number of consecutive misses required to release action
@@ -368,6 +395,12 @@ protected:
 
   /// @brief Polygon points (vertices) in a base_frame_id_
   std::vector<Point> poly_;
+  /// @brief Original (unexpanded) stop-polygon points in a base_frame_id_
+  std::vector<Point> original_poly_;
+  /// @brief Expanded stop-polygon points in a base_frame_id_
+  std::vector<Point> expanded_poly_;
+  /// @brief Whether the current stop polygon is in its expanded state
+  bool expansion_active_{false};
 };  // class Polygon
 
 }  // namespace nav2_collision_monitor

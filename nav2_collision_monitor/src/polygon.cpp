@@ -399,6 +399,30 @@ void Polygon::publish()
   polygon_pub_->publish(std::move(msg));
 }
 
+void Polygon::toggleStopPolygon()
+{
+  if (expandOnStopEnabled() && action_type_ == STOP) {
+    poly_ = expandOnStopActive() ? original_poly_ : expanded_poly_;
+    expansion_active_ = !expansion_active_;
+    geometry_msgs::msg::Point32 p_s;
+    for (std::size_t i = 0; i < poly_.size() && i < polygon_.polygon.points.size(); ++i) {
+      p_s.x = poly_[i].x;
+      p_s.y = poly_[i].y;
+      polygon_.polygon.points[i] = p_s;
+    }
+  }
+}
+
+void Polygon::expandPolygon(std::vector<Point> & polygon)
+{
+  auto sign0 = [](double x) {return x < 0.0 ? -1.0 : (x > 0.0 ? 1.0 : 0.0);};
+
+  for (auto & point : polygon) {
+    point.x += sign0(point.x) * expand_on_stop_padding_;
+    point.y += sign0(point.y) * expand_on_stop_padding_;
+  }
+}
+
 bool Polygon::getCommonParameters(
   std::string & polygon_sub_topic,
   std::string & polygon_pub_topic,
@@ -446,6 +470,14 @@ bool Polygon::getCommonParameters(
     }
 
     resetTriggerState();
+
+    // Adaptive stop polygon: optionally expand the STOP polygon while triggered
+    expand_on_stop_ = node->declare_or_get_parameter(
+      polygon_name_ + ".expand_on_stop", false);
+    reset_expansion_after_stop_ = node->declare_or_get_parameter(
+      polygon_name_ + ".reset_expansion_after_stop", 1.0);
+    expand_on_stop_padding_ = node->declare_or_get_parameter(
+      polygon_name_ + ".expand_on_stop_padding", 0.1);
 
     try {
       min_points_ = node->declare_or_get_parameter<int>(polygon_name_ + ".max_points") + 1;
@@ -566,6 +598,13 @@ bool Polygon::getParameters(
         polygon_name_.c_str());
     }
     return false;
+  }
+
+  // Precompute the expanded polygon for a static STOP polygon with expand-on-stop enabled
+  if (!use_dynamic_sub && action_type_ == STOP && expand_on_stop_) {
+    original_poly_ = poly_;
+    expanded_poly_ = poly_;
+    expandPolygon(expanded_poly_);
   }
 
   return true;

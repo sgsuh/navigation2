@@ -172,7 +172,7 @@ protected:
     const std::shared_ptr<Polygon> polygon,
     const std::unordered_map<std::string, std::vector<Point>> & sources_collision_points_map,
     const Velocity & velocity,
-    Action & robot_action) const;
+    Action & robot_action);
 
   /**
    * @brief Processes APPROACH action type
@@ -270,6 +270,8 @@ protected:
   rclcpp::Time stop_stamp_;
   /// @brief Timeout after which 0-velocity ceases to be published
   rclcpp::Duration stop_pub_timeout_;
+  /// @brief Latest timestamp when the stop polygon expansion was last toggled/reset
+  rclcpp::Time last_auto_reset_stamp_;
 };  // class CollisionMonitor
 
 }  // namespace nav2_collision_monitor

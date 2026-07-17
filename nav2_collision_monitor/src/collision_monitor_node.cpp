@@ -35,7 +35,8 @@ CollisionMonitor::CollisionMonitor(const rclcpp::NodeOptions & options)
 : nav2::LifecycleNode("collision_monitor", options),
   enabled_{true}, process_active_(false),
   robot_action_prev_{DO_NOTHING, {-1.0, -1.0, -1.0}, "", std::vector<Point>()},
-  stop_stamp_{0, 0, get_clock()->get_clock_type()}, stop_pub_timeout_(1.0, 0.0)
+  stop_stamp_{0, 0, get_clock()->get_clock_type()}, stop_pub_timeout_(1.0, 0.0),
+  last_auto_reset_stamp_{0, 0, get_clock()->get_clock_type()}
 {
 }
 
@@ -531,10 +532,19 @@ bool CollisionMonitor::processStopSlowdownLimit(
   const std::shared_ptr<Polygon> polygon,
   const std::unordered_map<std::string, std::vector<Point>> & sources_collision_points_map,
   const Velocity & velocity,
-  Action & robot_action) const
+  Action & robot_action)
 {
   if (!polygon->isShapeSet()) {
     return false;
+  }
+
+  // Adaptive stop polygon: revert the expanded polygon to its original size once the
+  // reset timeout elapses since the expansion was last (re)activated.
+  if (polygon->expandOnStopActive() &&
+    (this->now() - last_auto_reset_stamp_).seconds() > polygon->expandResetTimeout())
+  {
+    last_auto_reset_stamp_ = this->now();
+    polygon->toggleStopPolygon();
   }
 
   // Single pass: collect in-polygon points while isTriggered counts them.
@@ -548,6 +558,12 @@ bool CollisionMonitor::processStopSlowdownLimit(
       robot_action.req_vel.y = 0.0;
       robot_action.req_vel.tw = 0.0;
       robot_action.triggering_points = std::move(triggering_points);
+
+      // Expand the stop polygon on trigger, if enabled and not already expanded
+      if (polygon->expandOnStopEnabled() && !polygon->expandOnStopActive()) {
+        last_auto_reset_stamp_ = this->now();
+        polygon->toggleStopPolygon();
+      }
       return true;
     } else if (polygon->getActionType() == SLOWDOWN) {
       const Velocity safe_vel = velocity * polygon->getSlowdownRatio();
@@ -664,6 +680,7 @@ void CollisionMonitor::notifyActionState(
   if (state_pub_) {
     std::unique_ptr<nav2_msgs::msg::CollisionMonitorState> state_msg =
       std::make_unique<nav2_msgs::msg::CollisionMonitorState>();
+    state_msg->header.stamp = now();
     state_msg->polygon_name = robot_action.polygon_name;
     state_msg->action_type = robot_action.action_type;
 

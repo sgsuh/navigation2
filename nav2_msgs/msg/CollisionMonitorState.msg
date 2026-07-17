@@ -1,3 +1,5 @@
+std_msgs/Header header
+
 # Action type for robot in Collision Monitor
 uint8 DO_NOTHING=0 # No action
 uint8 STOP=1 # Stop the robot
