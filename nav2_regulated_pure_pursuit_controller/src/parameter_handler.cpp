@@ -159,6 +159,16 @@ ParameterHandler::ParameterHandler(
       "Parameter 'allow_obstacle_checking_beyond_goal' requires "
       "'min_distance_to_obstacle' to be greater than 0.0. ");
   }
+  params_.use_path_collision_detection =
+    node->declare_or_get_parameter(plugin_name_ + ".use_path_collision_detection", false);
+  params_.min_dist_to_path_collision =
+    node->declare_or_get_parameter(plugin_name_ + ".min_dist_to_path_collision", 0.5);
+  params_.min_time_to_path_collision =
+    node->declare_or_get_parameter(plugin_name_ + ".min_time_to_path_collision", 1.0);
+  params_.temp_allow_reversing_goal_proximity =
+    node->declare_or_get_parameter(plugin_name_ + ".temp_allow_reversing_goal_proximity", false);
+  params_.temp_allow_reversing_dist =
+    node->declare_or_get_parameter(plugin_name_ + ".temp_allow_reversing_dist", 0.3);
   if (params_.inflation_cost_scaling_factor <= 0.0) {
     RCLCPP_WARN(
       logger_, "The value inflation_cost_scaling_factor is incorrectly set, "
@@ -279,6 +289,12 @@ ParameterHandler::updateParametersCallback(
         params_.rotate_to_heading_min_angle = parameter.as_double();
       } else if (param_name == plugin_name_ + ".approach_velocity_scaling_dist") {
         params_.approach_velocity_scaling_dist = parameter.as_double();
+      } else if (param_name == plugin_name_ + ".min_dist_to_path_collision") {
+        params_.min_dist_to_path_collision = parameter.as_double();
+      } else if (param_name == plugin_name_ + ".min_time_to_path_collision") {
+        params_.min_time_to_path_collision = parameter.as_double();
+      } else if (param_name == plugin_name_ + ".temp_allow_reversing_dist") {
+        params_.temp_allow_reversing_dist = parameter.as_double();
       }
     } else if (param_type == ParameterType::PARAMETER_BOOL) {
       if (param_name == plugin_name_ + ".use_velocity_scaled_lookahead_dist") {
@@ -303,6 +319,10 @@ ParameterHandler::updateParametersCallback(
         params_.use_dynamic_window = parameter.as_bool();
       } else if (param_name == plugin_name_ + ".allow_obstacle_checking_beyond_goal") {
         params_.allow_obstacle_checking_beyond_goal = parameter.as_bool();
+      } else if (param_name == plugin_name_ + ".use_path_collision_detection") {
+        params_.use_path_collision_detection = parameter.as_bool();
+      } else if (param_name == plugin_name_ + ".temp_allow_reversing_goal_proximity") {
+        params_.temp_allow_reversing_goal_proximity = parameter.as_bool();
       }
     }
   }

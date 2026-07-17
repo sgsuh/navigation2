@@ -63,6 +63,13 @@ struct Parameters
   bool use_collision_detection;
   bool use_dynamic_window;
   bool allow_obstacle_checking_beyond_goal;
+  // Optional path collision detection: scan the upcoming path and slow/stop near obstacles
+  bool use_path_collision_detection;
+  double min_dist_to_path_collision;
+  double min_time_to_path_collision;
+  // Optionally allow reversing temporarily when very close to the goal
+  bool temp_allow_reversing_goal_proximity;
+  double temp_allow_reversing_dist;
 };
 
 /**

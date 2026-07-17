@@ -188,18 +188,21 @@ protected:
   std::shared_ptr<nav2_costmap_2d::Costmap2DROS> costmap_ros_;
   nav2_costmap_2d::Costmap2D * costmap_;
   rclcpp::Logger logger_ {rclcpp::get_logger("RegulatedPurePursuitController")};
+  rclcpp::Clock::SharedPtr clock_;
 
   Parameters * params_;
   double control_duration_;
   bool cancelling_ = false;
   bool finished_cancelling_ = false;
   bool is_rotating_to_heading_ = false;
+  bool prev_collision_detected_ = false;
   geometry_msgs::msg::Twist last_command_velocity_;
 
   nav2::Publisher<geometry_msgs::msg::PointStamped>::SharedPtr carrot_pub_;
   nav2::Publisher<geometry_msgs::msg::PointStamped>::SharedPtr curvature_carrot_pub_;
   nav2::Publisher<std_msgs::msg::Bool>::SharedPtr is_rotating_to_heading_pub_;
   nav2::Publisher<nav_msgs::msg::Path>::SharedPtr carrot_arc_pub_;
+  nav2::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr collision_point_pub_;
   std::unique_ptr<nav2_regulated_pure_pursuit_controller::ParameterHandler> param_handler_;
   std::unique_ptr<nav2_regulated_pure_pursuit_controller::CollisionChecker> collision_checker_;
 };

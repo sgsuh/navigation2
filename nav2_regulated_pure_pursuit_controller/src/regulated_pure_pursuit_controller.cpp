@@ -25,6 +25,7 @@
 #include "nav2_core/controller_exceptions.hpp"
 #include "nav2_ros_common/node_utils.hpp"
 #include "nav2_util/geometry_utils.hpp"
+#include "nav2_util/robot_utils.hpp"
 #include "nav2_util/controller_utils.hpp"
 #include "nav2_util/path_utils.hpp"
 #include "nav2_costmap_2d/costmap_filters/filter_values.hpp"
@@ -54,6 +55,7 @@ void RegulatedPurePursuitController::configure(
   tf_ = tf;
   plugin_name_ = name;
   logger_ = node->get_logger();
+  clock_ = node->get_clock();
 
   // Handles storage and dynamic configuration of parameters.
   // Returns pointer to data current param settings.
@@ -74,6 +76,7 @@ void RegulatedPurePursuitController::configure(
     "curvature_lookahead_point");
   is_rotating_to_heading_pub_ = node->create_publisher<std_msgs::msg::Bool>(
     "is_rotating_to_heading");
+  collision_point_pub_ = node->create_publisher<geometry_msgs::msg::PoseStamped>("collision_point");
 }
 
 void RegulatedPurePursuitController::cleanup()
@@ -86,6 +89,7 @@ void RegulatedPurePursuitController::cleanup()
   carrot_pub_.reset();
   curvature_carrot_pub_.reset();
   is_rotating_to_heading_pub_.reset();
+  collision_point_pub_.reset();
 }
 
 void RegulatedPurePursuitController::activate()
@@ -98,6 +102,7 @@ void RegulatedPurePursuitController::activate()
   carrot_pub_->on_activate();
   curvature_carrot_pub_->on_activate();
   is_rotating_to_heading_pub_->on_activate();
+  collision_point_pub_->on_activate();
   param_handler_->activate();
 }
 
@@ -111,6 +116,7 @@ void RegulatedPurePursuitController::deactivate()
   carrot_pub_->on_deactivate();
   curvature_carrot_pub_->on_deactivate();
   is_rotating_to_heading_pub_->on_deactivate();
+  collision_point_pub_->on_deactivate();
   param_handler_->deactivate();
   last_command_velocity_ = geometry_msgs::msg::Twist();
 }
@@ -202,9 +208,25 @@ geometry_msgs::msg::TwistStamped RegulatedPurePursuitController::computeVelocity
     curvature_carrot_pub_->publish(createCarrotMsg(curvature_lookahead_pose));
   }
 
+  // Optionally allow reversing temporarily when very close to the goal, so the robot can
+  // still align even if the goal was slightly overshot.
+  bool temp_allow_reversing = false;
+  if (params_->temp_allow_reversing_goal_proximity) {
+    geometry_msgs::msg::PoseStamped goal_in_robot_frame;
+    if (!nav2_util::transformPoseInTargetFrame(
+        global_goal, goal_in_robot_frame, *tf_, pose.header.frame_id,
+        costmap_ros_->getTransformTolerance()))
+    {
+      throw nav2_core::ControllerTFError("Unable to transform goal into the robot pose frame");
+    }
+    temp_allow_reversing =
+      nav2_util::geometry_utils::euclidean_distance(pose, goal_in_robot_frame) <
+      params_->temp_allow_reversing_dist;
+  }
+
   // Setting the velocity direction
   double x_vel_sign = 1.0;
-  if (params_->allow_reversing) {
+  if (params_->allow_reversing || temp_allow_reversing) {
     x_vel_sign = carrot_pose.pose.position.x >= 0.0 ? 1.0 : -1.0;
   }
 
@@ -277,6 +299,74 @@ geometry_msgs::msg::TwistStamped RegulatedPurePursuitController::computeVelocity
         regulation_curvature,
         x_vel_sign,
         control_duration_);
+    }
+  }
+
+  // Optional path collision detection: scan the upcoming (base-frame) path for obstacles and
+  // slow to a safe speed / stop before reaching the first collision point.
+  if (params_->use_path_collision_detection) {
+    double prev_integrated_len = 0.0;
+    double integrated_len = 0.0;
+    bool collision = false;
+    for (unsigned int i = 0; i < transformed_plan.poses.size(); ++i) {
+      const auto & path_pose_base = transformed_plan.poses.at(i);
+      if (i != 0) {
+        const auto & prev_position = transformed_plan.poses.at(i - 1).pose.position;
+        integrated_len += nav2_util::geometry_utils::euclidean_distance(
+          path_pose_base.pose.position, prev_position);
+        // sample roughly every 5 cm to bound the cost
+        if (integrated_len - prev_integrated_len < 0.05) {
+          continue;
+        }
+        prev_integrated_len = integrated_len;
+      }
+
+      // Transform the path pose into the local costmap frame to query the collision checker
+      geometry_msgs::msg::PoseStamped path_pose_costmap;
+      if (!nav2_util::transformPoseInTargetFrame(
+          path_pose_base, path_pose_costmap, *tf_, costmap_ros_->getGlobalFrameID(),
+          costmap_ros_->getTransformTolerance()))
+      {
+        throw nav2_core::ControllerTFError("Unable to transform path pose into the costmap frame");
+      }
+      const double yaw = tf2::getYaw(path_pose_costmap.pose.orientation);
+      if (collision_checker_->inCollision(
+          path_pose_costmap.pose.position.x, path_pose_costmap.pose.position.y, yaw))
+      {
+        collision = true;
+        if (integrated_len < params_->min_dist_to_path_collision) {
+          RCLCPP_WARN(logger_, "Collision %.2f m ahead on path: stopping.", integrated_len);
+          linear_vel = 0.0;
+        } else {
+          const double safe_linear_vel =
+            (integrated_len - params_->min_dist_to_path_collision) /
+            params_->min_time_to_path_collision;
+          linear_vel = std::min(linear_vel, safe_linear_vel);
+          RCLCPP_WARN(
+            logger_, "Collision %.2f m ahead on path: slowing to %.2f m/s.",
+            integrated_len, linear_vel);
+        }
+
+        geometry_msgs::msg::PoseStamped collision_pose_global;
+        if (nav2_util::transformPoseInTargetFrame(
+            path_pose_base, collision_pose_global, *tf_, costmap_ros_->getGlobalFrameID(),
+            costmap_ros_->getTransformTolerance()))
+        {
+          collision_pose_global.header.stamp = clock_->now();
+          collision_point_pub_->publish(collision_pose_global);
+        }
+        prev_collision_detected_ = true;
+        break;
+      }
+    }
+    if (!collision) {
+      prev_collision_detected_ = false;
+    }
+
+    // Re-derive angular velocity from the (possibly reduced) linear velocity, but never override
+    // an in-place rotation-to-heading command or the coupled dynamic-window solution.
+    if (!is_rotating_to_heading_ && !params_->use_dynamic_window) {
+      angular_vel = linear_vel * regulation_curvature;
     }
   }
 
