@@ -174,6 +174,7 @@ protected:
   bool path_updated_;
   nav_msgs::msg::Path current_path_;
   geometry_msgs::msg::PoseStamped current_goal_;
+  geometry_msgs::msg::PoseStamped current_pose_;
   Parameters * params_;
   bool in_rotation_;
   double last_angular_vel_ = std::numeric_limits<double>::max();

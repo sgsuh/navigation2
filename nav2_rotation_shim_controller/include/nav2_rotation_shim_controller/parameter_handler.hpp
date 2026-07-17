@@ -44,6 +44,14 @@ struct Parameters
   bool closed_loop;
   bool use_path_orientations;
   std::string primary_controller;
+  // Reject the path (throw InvalidPath) when the robot strays farther than this from the
+  // nearest path point. <= 0 disables the check (default off, opt-in).
+  double max_dist_from_path;
+  // Optional deceleration-to-heading slowdown profile (replaces the sqrt overshoot guard).
+  bool avoid_overshoot;
+  double min_angular_vel;
+  double start_slowdown_threshold;
+  double stop_slowdown_threshold;
 };
 
 /**

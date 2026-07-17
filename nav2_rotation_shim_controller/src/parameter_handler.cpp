@@ -73,6 +73,16 @@ ParameterHandler::ParameterHandler(
   params_.closed_loop = node->declare_or_get_parameter(plugin_name_ + ".closed_loop", true);
   params_.use_path_orientations = node->declare_or_get_parameter(plugin_name_ +
     ".use_path_orientations", false);
+  params_.max_dist_from_path = node->declare_or_get_parameter(plugin_name_ +
+    ".max_dist_from_path", 0.0);  // <= 0 disables the deviation check
+  params_.avoid_overshoot = node->declare_or_get_parameter(plugin_name_ +
+    ".avoid_overshoot", false);
+  params_.min_angular_vel = node->declare_or_get_parameter(plugin_name_ +
+    ".min_angular_vel", 0.1);
+  params_.start_slowdown_threshold = node->declare_or_get_parameter(plugin_name_ +
+    ".start_slowdown_threshold", 0.7);
+  params_.stop_slowdown_threshold = node->declare_or_get_parameter(plugin_name_ +
+    ".stop_slowdown_threshold", 0.2);
   double control_frequency = 20.0;
   node->get_parameter("controller_frequency", control_frequency);
   params_.control_duration = 1.0 / control_frequency;
@@ -133,6 +143,14 @@ ParameterHandler::updateParametersCallback(
         params_.max_cost_threshold = parameter.as_double();
       } else if (param_name == plugin_name_ + ".simulate_ahead_time") {
         params_.simulate_ahead_time = parameter.as_double();
+      } else if (param_name == plugin_name_ + ".max_dist_from_path") {
+        params_.max_dist_from_path = parameter.as_double();
+      } else if (param_name == plugin_name_ + ".min_angular_vel") {
+        params_.min_angular_vel = parameter.as_double();
+      } else if (param_name == plugin_name_ + ".start_slowdown_threshold") {
+        params_.start_slowdown_threshold = parameter.as_double();
+      } else if (param_name == plugin_name_ + ".stop_slowdown_threshold") {
+        params_.stop_slowdown_threshold = parameter.as_double();
       }
     } else if (param_type == ParameterType::PARAMETER_BOOL) {
       if (param_name == plugin_name_ + ".rotate_to_goal_heading") {
@@ -143,6 +161,8 @@ ParameterHandler::updateParametersCallback(
         params_.closed_loop = parameter.as_bool();
       } else if (param_name == plugin_name_ + ".use_path_orientations") {
         params_.use_path_orientations = parameter.as_bool();
+      } else if (param_name == plugin_name_ + ".avoid_overshoot") {
+        params_.avoid_overshoot = parameter.as_bool();
       }
     }
   }

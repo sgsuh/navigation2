@@ -125,6 +125,7 @@ geometry_msgs::msg::TwistStamped RotationShimController::computeVelocityCommands
   current_path_ = transformed_global_plan;
   path_updated_ = params_->rotate_to_heading_once ? isGoalChanged(global_goal) : true;
   current_goal_ = global_goal;
+  current_pose_ = pose;
   // Rotate to goal heading when in goal xy tolerance
   if (params_->rotate_to_goal_heading) {
     std::lock_guard<std::mutex> lock_reinit(param_handler_->getMutex());
@@ -212,6 +213,31 @@ geometry_msgs::msg::PoseStamped RotationShimController::getSampledPathPt(
             "Path is too short to find a valid sampled path point for rotation.");
   }
 
+  // Path-deviation check (opt-in): if the robot has strayed farther than max_dist_from_path
+  // from the nearest point on the path, the path is no longer trackable by a rotate-to-heading
+  // shim, so reject it as invalid.
+  if (params_->max_dist_from_path > 0.0) {
+    geometry_msgs::msg::PoseStamped robot_pose_in_path_frame;
+    if (!nav2_util::transformPoseInTargetFrame(
+        current_pose_, robot_pose_in_path_frame, *tf_,
+        current_path_.header.frame_id, costmap_ros_->getTransformTolerance()))
+    {
+      throw nav2_core::ControllerTFError("Cannot transform robot pose into the path frame.");
+    }
+
+    auto closest_pose_it = nav2_util::geometry_utils::min_by(
+      current_path_.poses.begin(), current_path_.poses.end(),
+      [&robot_pose_in_path_frame](const geometry_msgs::msg::PoseStamped & ps) {
+        return nav2_util::geometry_utils::euclidean_distance(robot_pose_in_path_frame, ps);
+      });
+    if (closest_pose_it != current_path_.poses.end() &&
+      nav2_util::geometry_utils::euclidean_distance(robot_pose_in_path_frame, *closest_pose_it) >
+      params_->max_dist_from_path)
+    {
+      throw nav2_core::InvalidPath("Robot is too far away from the path.");
+    }
+  }
+
   geometry_msgs::msg::Pose start = current_path_.poses.front().pose;
   double dx, dy;
 
@@ -274,10 +300,30 @@ RotationShimController::computeRotateToHeadingCommand(
     std::clamp(angular_vel, min_feasible_angular_speed, max_feasible_angular_speed);
 
   // Check if we need to slow down to avoid overshooting
-  double max_vel_to_stop = std::sqrt(2 * params_->max_angular_accel *
-    fabs(angular_distance_to_heading));
-  if (fabs(cmd_vel.twist.angular.z) > max_vel_to_stop) {
-    cmd_vel.twist.angular.z = sign * max_vel_to_stop;
+  if (params_->avoid_overshoot) {
+    // Linearly ramp the angular speed between min_angular_vel and rotate_to_heading_angular_vel
+    // as the remaining heading error sweeps from stop_slowdown_threshold to
+    // start_slowdown_threshold, holding min_angular_vel below the stop threshold.
+    double factor = 0.0;
+    if (fabs(angular_distance_to_heading) >= params_->stop_slowdown_threshold) {
+      const double span =
+        fabs(params_->start_slowdown_threshold - params_->stop_slowdown_threshold);
+      factor = span > 0.0 ?
+        std::min(
+        1.0, (fabs(angular_distance_to_heading) - params_->stop_slowdown_threshold) / span) :
+        1.0;
+    }
+    const double cmd = params_->min_angular_vel +
+      std::max(0.0, factor) *
+      (params_->rotate_to_heading_angular_vel - params_->min_angular_vel);
+    cmd_vel.twist.angular.z =
+      std::clamp(sign * cmd, min_feasible_angular_speed, max_feasible_angular_speed);
+  } else {
+    double max_vel_to_stop = std::sqrt(2 * params_->max_angular_accel *
+      fabs(angular_distance_to_heading));
+    if (fabs(cmd_vel.twist.angular.z) > max_vel_to_stop) {
+      cmd_vel.twist.angular.z = sign * max_vel_to_stop;
+    }
   }
 
   isCollisionFree(cmd_vel, angular_distance_to_heading, pose);
