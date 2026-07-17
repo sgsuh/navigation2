@@ -74,6 +74,17 @@ public:
     bool fetch_costmap_and_footprint = true);
 
   /**
+   * @brief Returns the cost of the single cell at a particular pose's position
+   *
+   * @param pose Pose to get the point cost at
+   * @param fetch_costmap Defaults to true. When checking with multiple poses at once,
+   * the costmap should be fetched in the first check but fetching can be skipped in consequent checks
+   */
+  double scorePoint(
+    const geometry_msgs::msg::Pose & pose,
+    bool fetch_costmap = true);
+
+  /**
    * @brief Returns if a pose is collision free
    *
    * @param pose Pose to check collision at
@@ -83,6 +94,29 @@ public:
   bool isCollisionFree(
     const geometry_msgs::msg::Pose & pose,
     bool fetch_costmap_and_footprint = true);
+
+  /**
+   * @brief Returns true if the single cell at a pose's position is a lethal obstacle
+   *
+   * @param pose Pose to check the point cost at
+   * @param fetch_costmap Defaults to true. When checking with multiple poses at once,
+   * the costmap should be fetched in the first check but fetching can be skipped in consequent checks
+   */
+  bool isPointLethal(
+    const geometry_msgs::msg::Pose & pose,
+    bool fetch_costmap = true);
+
+  /**
+   * @brief Returns true if the robot's base cell is illegal (inscribed inflated
+   * obstacle or worse), i.e. the base pose itself lies in obstacle or inflation
+   *
+   * @param pose Pose to check the base cell at
+   * @param fetch_costmap Defaults to true. When checking with multiple poses at once,
+   * the costmap should be fetched in the first check but fetching can be skipped in consequent checks
+   */
+  bool isBasePoseIllegal(
+    const geometry_msgs::msg::Pose & pose,
+    bool fetch_costmap = true);
 
 protected:
   /**

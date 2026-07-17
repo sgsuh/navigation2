@@ -78,6 +78,69 @@ bool CostmapTopicCollisionChecker::isCollisionFree(
   }
 }
 
+bool CostmapTopicCollisionChecker::isPointLethal(
+  const geometry_msgs::msg::Pose & pose,
+  bool fetch_costmap)
+{
+  try {
+    if (scorePoint(pose, fetch_costmap) >= LETHAL_OBSTACLE) {
+      return true;
+    }
+    return false;
+  } catch (const IllegalPoseException & e) {
+    RCLCPP_ERROR(rclcpp::get_logger(name_), "%s", e.what());
+    return false;
+  } catch (const CollisionCheckerException & e) {
+    RCLCPP_ERROR(rclcpp::get_logger(name_), "%s", e.what());
+    return false;
+  } catch (...) {
+    RCLCPP_ERROR(rclcpp::get_logger(name_), "Failed to check pose score!");
+    return false;
+  }
+}
+
+bool CostmapTopicCollisionChecker::isBasePoseIllegal(
+  const geometry_msgs::msg::Pose & pose,
+  bool fetch_costmap)
+{
+  try {
+    if (scorePoint(pose, fetch_costmap) >= INSCRIBED_INFLATED_OBSTACLE) {
+      return true;
+    }
+    return false;
+  } catch (const IllegalPoseException & e) {
+    RCLCPP_ERROR(rclcpp::get_logger(name_), "%s", e.what());
+    return false;
+  } catch (const CollisionCheckerException & e) {
+    RCLCPP_ERROR(rclcpp::get_logger(name_), "%s", e.what());
+    return false;
+  } catch (...) {
+    RCLCPP_ERROR(rclcpp::get_logger(name_), "Failed to check pose score!");
+    return false;
+  }
+}
+
+double CostmapTopicCollisionChecker::scorePoint(
+  const geometry_msgs::msg::Pose & pose,
+  bool fetch_costmap)
+{
+  if (fetch_costmap) {
+    try {
+      collision_checker_.setCostmap(costmap_sub_.getCostmap());
+    } catch (const std::runtime_error & e) {
+      throw CollisionCheckerException(e.what());
+    }
+  }
+
+  unsigned int cell_x, cell_y;
+  if (!collision_checker_.worldToMap(pose.position.x, pose.position.y, cell_x, cell_y)) {
+    RCLCPP_DEBUG(rclcpp::get_logger(name_), "Map Cell: [%d, %d]", cell_x, cell_y);
+    throw IllegalPoseException(name_, "Pose Goes Off Grid.");
+  }
+
+  return collision_checker_.pointCost(cell_x, cell_y);
+}
+
 double CostmapTopicCollisionChecker::scorePose(
   const geometry_msgs::msg::Pose & pose,
   bool fetch_costmap_and_footprint)
