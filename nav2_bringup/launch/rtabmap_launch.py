@@ -36,6 +36,7 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, GroupAction
 from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node, PushROSNamespace, SetParameter
+from launch_ros.parameter_descriptions import ParameterValue
 from nav2_common.launch import LaunchConfigAsBool
 
 
@@ -234,6 +235,18 @@ def generate_launch_description() -> LaunchDescription:
                         'subscribe_stereo': False,
                         'subscribe_odom_info': False,
                         'approx_sync': True,
+                        # Without a camera there are no visual features, so
+                        # RTAB-Map disables bag-of-words and every node becomes
+                        # a "bad signature". Leaving Mem/BadSignaturesIgnored
+                        # true would then silently discard every node -- mapping
+                        # produces nothing at all, with no error, just WM=0.
+                        # value_type=str is required: every RTAB-Map parameter
+                        # is string-typed, and launch would otherwise infer
+                        # "true"/"false" as a bool and abort the node.
+                        'Mem/BadSignaturesIgnored': ParameterValue(
+                            PythonExpression(
+                                ["'true' if ", use_rgbd, " else 'false'"]),
+                            value_type=str),
                         'odom_sensor_sync': True,
                         'topic_queue_size': 5,
                         'sync_queue_size': 5,
