@@ -1,0 +1,57 @@
+# RTAB-Map tuning for a 2D-lidar + RGBD AMR -- mapping mode.
+#
+# Only parameters that differ from RTAB-Map 0.23.8's own defaults are listed;
+# everything else is left at the default. Every RTAB-Map parameter is
+# string-typed, hence the quotes.
+#
+# Derived from ThorDrive's rtabmap_config_mapping.ini. That file was a full
+# 1200-line dump from the RTAB-Map desktop GUI (and targeted 0.21.9), most of
+# which was GUI state irrelevant to the ROS node. It is deliberately not used
+# directly: RTAB-Map rewrites its ini config on every clean shutdown, which
+# would keep dirtying this file with machine-specific absolute paths.
+/**:
+  rtabmap:
+    ros__parameters:
+      Grid/3D: "false"
+      Grid/MaxGroundAngle: "5"
+      Grid/MaxGroundHeight: "0.05"
+      Grid/MaxObstacleHeight: "0.5"
+      Grid/NormalsSegmentation: "false"
+      Grid/RangeMax: "4.0"
+      Grid/RangeMin: "0.5"
+      Grid/RayTracing: "true"
+      Grid/ScanDecimation: "3"
+      GridGlobal/OccupancyThr: "0.6"
+      GridGlobal/ProbHit: "0.6"
+      GridGlobal/ProbMiss: "0.35"
+      Icp/Force4DoF: "true"
+      Icp/MaxCorrespondenceDistance: "0.3"
+      Icp/PointToPlaneK: "10"
+      Icp/RangeMax: "10.0"
+      Icp/RangeMin: "0.5"
+      Icp/VoxelSize: "0"
+      Kp/ByteToFloat: "true"
+      Mem/BadSignaturesIgnored: "true"
+      Mem/ImageKept: "true"
+      Mem/NotLinkedNodesKept: "false"
+      Mem/RawDescriptorsKept: "false"
+      Mem/ReduceGraph: "true"
+      Mem/SaveDepth16Format: "true"
+      RGBD/AggressiveLoopThr: "0.01"
+      RGBD/AngularUpdate: "0.2"
+      RGBD/LinearUpdate: "0.2"
+      RGBD/MaxOdomCacheSize: "3"
+      RGBD/NeighborLinkRefining: "true"
+      RGBD/ProximityAngle: "360"
+      RGBD/ProximityMaxGraphDepth: "0"
+      RGBD/ProximityMaxPaths: "1"
+      RGBD/ProximityMergedScanCovFactor: "10.0"
+      RGBD/ProximityPathFilteringRadius: "5.0"
+      RGBD/ProximityPathMaxNeighbors: "3"
+      RGBD/ProximityPathRawPosesUsed: "false"
+      Reg/Force3DoF: "true"
+      Reg/Strategy: "1"
+      Rtabmap/DetectionRate: "2"
+      Rtabmap/ImageBufferSize: "2"
+      Rtabmap/PublishLastSignature: "false"
+      Rtabmap/StartNewMapOnLoopClosure: "true"

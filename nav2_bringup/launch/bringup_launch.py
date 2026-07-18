@@ -34,6 +34,7 @@ def generate_launch_description() -> LaunchDescription:
     # Create the launch configuration variables
     namespace = LaunchConfiguration('namespace')
     slam = LaunchConfigAsBool('slam')
+    localization = LaunchConfiguration('localization')
     map_yaml_file = LaunchConfiguration('map')
     keepout_mask_yaml_file = LaunchConfiguration('keepout_mask')
     speed_mask_yaml_file = LaunchConfiguration('speed_mask')
@@ -79,6 +80,14 @@ def generate_launch_description() -> LaunchDescription:
 
     declare_slam_cmd = DeclareLaunchArgument(
         'slam', default_value='False', description='Whether run a SLAM'
+    )
+
+    declare_localization_cmd = DeclareLaunchArgument(
+        'localization',
+        default_value='amcl',
+        description='Which localization stack to bring up: "amcl" (map_server + '
+                    'AMCL) or "rtabmap" (RTAB-Map, which provides both the map '
+                    'and the map->odom TF). Ignored when slam is True'
     )
 
     declare_map_yaml_cmd = DeclareLaunchArgument(
@@ -192,7 +201,12 @@ def generate_launch_description() -> LaunchDescription:
                 PythonLaunchDescriptionSource(
                     os.path.join(launch_dir, 'localization_launch.py')
                 ),
-                condition=IfCondition(PythonExpression(['not ', slam, ' and ', use_localization])),
+                condition=IfCondition(
+                    PythonExpression(
+                        ['not ', slam, ' and "', localization, '" == "amcl" and ',
+                         use_localization]
+                    )
+                ),
                 launch_arguments={
                     'namespace': namespace,
                     'map': map_yaml_file,
@@ -203,6 +217,24 @@ def generate_launch_description() -> LaunchDescription:
                     'use_intra_process_comms': use_intra_process_comms,
                     'use_respawn': use_respawn,
                     'container_name': container_name,
+                }.items(),
+            ),
+
+            IncludeLaunchDescription(
+                PythonLaunchDescriptionSource(
+                    os.path.join(launch_dir, 'rtabmap_launch.py')
+                ),
+                condition=IfCondition(
+                    PythonExpression(
+                        ['not ', slam, ' and "', localization, '" == "rtabmap" and ',
+                         use_localization]
+                    )
+                ),
+                launch_arguments={
+                    'namespace': namespace,
+                    'use_sim_time': use_sim_time,
+                    'use_respawn': use_respawn,
+                    'log_level': log_level,
                 }.items(),
             ),
 
@@ -270,6 +302,7 @@ def generate_launch_description() -> LaunchDescription:
     # Declare the launch options
     ld.add_action(declare_namespace_cmd)
     ld.add_action(declare_slam_cmd)
+    ld.add_action(declare_localization_cmd)
     ld.add_action(declare_map_yaml_cmd)
     ld.add_action(declare_keepout_mask_yaml_cmd)
     ld.add_action(declare_speed_mask_yaml_cmd)
