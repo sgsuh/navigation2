@@ -25,6 +25,7 @@
   <test_depend>nav2_behavior_tree</test_depend>
   <test_depend>nav2_bringup</test_depend>
   <test_depend>nav2_lifecycle_manager</test_depend>
+  <test_depend>nav2_loopback_sim</test_depend>
   <test_depend>nav2_map_server</test_depend>
   <test_depend>nav2_minimal_tb3_sim</test_depend>
   <test_depend>nav2_msgs</test_depend>
@@ -38,6 +39,10 @@
   <test_depend>rclcpp_lifecycle</test_depend>
   <test_depend>rclpy</test_depend>
   <test_depend>robot_state_publisher</test_depend>
+  <!-- Provides the rtabmap node driven by src/rtabmap; built from the
+       third_party/rtabmap_ros submodule in this workspace. -->
+  <test_depend>rtabmap_slam</test_depend>
+  <test_depend>sensor_msgs</test_depend>
   <test_depend>std_msgs</test_depend>
   <test_depend>tf2</test_depend>
   <test_depend>tf2_geometry_msgs</test_depend>
