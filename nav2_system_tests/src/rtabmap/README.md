@@ -1,7 +1,18 @@
-# RTAB-Map localization/mapping system test
+# RTAB-Map localization/mapping system tests
 
 Exercises `bringup_launch.py localization:=rtabmap` end to end without a robot,
 a physics simulator, or a camera.
+
+Two tests, chained by a CTest fixture:
+
+| Test | Mode | What it covers |
+|---|---|---|
+| `test_rtabmap` | `rtabmap_mode:=mapping` | builds a map from scratch, leaves the database behind |
+| `test_rtabmap_localization` | `rtabmap_mode:=localization` | re-uses that database read-only |
+
+`test_rtabmap` declares `FIXTURES_SETUP rtabmap_database` and the localization
+test declares `FIXTURES_REQUIRED`, so the second only runs after the first has
+passed, and never concurrently with it — they share one database file.
 
 ## What it does
 
@@ -16,7 +27,12 @@ The ground truth (`nav2_bringup/maps/depot.yaml`) is reachable only through the
 `map`. RTAB-Map therefore never sees it: it has to rebuild the map from scans
 alone.
 
-## What it asserts
+Both tests must publish an initial pose before anything happens at all:
+`loopback_simulator` creates its scan and odom timers inside the `/initialpose`
+callback, so until a pose arrives it publishes nothing — not even the all-inf
+scan it falls back to when it cannot raycast.
+
+## What test_rtabmap asserts
 
 1. The mock produces a `LaserScan` with finite returns. This is also the signal
    that `loopback_simulator` has fully initialised — it silently emits an
@@ -37,6 +53,37 @@ Check 4 is the one that matters. The failure it guards against — a costmap tha
 looks populated while silently ignoring the map, because of a topic-namespace or
 QoS mismatch — is invisible from `ros2 topic echo /map`.
 
+## What test_rtabmap_localization asserts
+
+1. `Mem/IncrementalMemory` reads back as `"false"` off the running node — the
+   one parameter that distinguishes the two modes, and proof that
+   `rtabmap_mode:=localization` selected `rtabmap_localization.yaml`.
+2. A map with real occupied cells is published. Since the graph cannot grow in
+   this mode, such a map has nowhere to come from except the database. Note
+   the robot has to be nudged first: RTAB-Map publishes the grid from its
+   processing loop, so a standing robot publishes nothing even with the
+   database already loaded.
+3. `map` -> `odom` is published, as in mapping mode.
+4. `StaticLayer` consumes the stored map, same dimension check as above.
+5. Driving does not change the grid — dimensions *and* occupied-cell count
+   stay identical. The count is what gives this teeth: a short drive through
+   already-mapped space need not enlarge the bounding box even when mapping is
+   on, but integrating new scans would move cells.
+
+## Gotchas found while writing these
+
+- **RTAB-Map segfaults if started in localization mode against an empty or
+  missing database** (exit code -11, no diagnostic). Always map first. This is
+  upstream behaviour, not something the launch files guard against.
+- **A database built in mapping mode carries its parameters with it.** On load
+  RTAB-Map logs `Update RTAB-Map parameter "RGBD/LinearUpdate"="0.2" from
+  database` and similar, overriding the corresponding values in
+  `rtabmap_localization.yaml`. `Mem/IncrementalMemory` still comes from the
+  YAML, so the mode itself is unaffected, but the localization-specific
+  tuning of `RGBD/AngularUpdate`, `RGBD/LinearUpdate`,
+  `RGBD/ProximityPath*` and `Rtabmap/StartNewMapOnLoopClosure` is not what
+  ends up running.
+
 ## Known gaps
 
 - Runs with `use_rgbd:=False`, unlike the default configuration. There is no
@@ -44,5 +91,6 @@ QoS mismatch — is invisible from `ros2 topic echo /map`.
   and bogus loop closures, so they would prove nothing. The map-topic and QoS
   wiring under test is identical either way, but **the RGB-D path itself is not
   covered here**.
-- Mapping mode only. Localization mode against a prebuilt database is not
-  exercised.
+- Localization accuracy is not checked. The tests confirm that `map` -> `odom`
+  is published, not that it is correct — with a perfect simulated odometry
+  source there is nothing meaningful for the correction to recover from.

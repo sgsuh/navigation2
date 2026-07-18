@@ -14,19 +14,17 @@
 # limitations under the License.
 
 """
-End-to-end test of `bringup_launch.py localization:=rtabmap` in mapping mode.
+Test `bringup_launch.py localization:=rtabmap` in localization mode.
 
-The synthetic robot is described in mock_robot.py. RTAB-Map never sees the
-ground truth map: it has to rebuild it from scans, publish it, and have Nav2's
-StaticLayer pick it up.
+This is the mode that replaces AMCL: RTAB-Map loads a database built earlier
+and re-uses it read-only, publishing the stored map and the map -> odom
+transform without extending the graph.
 
-On success this leaves a populated database at mock_robot.database_path(),
-which is the fixture test_rtabmap_localization consumes.
-
-Runs with use_rgbd:=False because there is no synthetic camera: static fake
-images would produce meaningless visual features and bogus loop closures. The
-map-topic and QoS wiring under test is identical either way, but note that the
-RGB-D path itself is therefore not covered here.
+The database comes from test_rtabmap, which is declared as a CTest fixture, so
+this test only runs after mapping has succeeded. The synthetic robot is the
+same one, described in mock_robot.py, started at the same pose the mapping run
+started from -- passed to RTAB-Map as `initial_pose` since there is no AMCL to
+converge from a guess.
 """
 
 import os
@@ -39,7 +37,9 @@ from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch_testing.legacy import LaunchTestService
 
 sys.path.append(os.path.dirname(__file__))
-from mock_robot import database_path, mock_robot_nodes  # noqa: E402,I100,I202
+from mock_robot import (  # noqa: E402,I100,I202
+    database_path, mock_robot_nodes, START_X, START_Y,
+)
 
 
 def main(argv=sys.argv[1:]):
@@ -52,9 +52,10 @@ def main(argv=sys.argv[1:]):
         ),
         launch_arguments={
             'localization': 'rtabmap',
-            'rtabmap_mode': 'mapping',
+            'rtabmap_mode': 'localization',
             'rtabmap_db': database_path(),
-            'rtabmap_args': '-d',  # start from an empty database every run
+            # Deliberately no '-d': the whole point is to re-use the database.
+            'initial_pose': f'{START_X} {START_Y} 0 0 0 0',
             'use_rgbd': 'False',
             'use_composition': 'False',
             'use_keepout_zones': 'False',
@@ -67,7 +68,7 @@ def main(argv=sys.argv[1:]):
 
     test1_action = ExecuteProcess(
         cmd=[sys.executable, testExecutable],
-        name='test_rtabmap_node',
+        name='test_rtabmap_localization_node',
         output='screen',
     )
 

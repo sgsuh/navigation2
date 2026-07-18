@@ -8,3 +8,22 @@ nav2_add_test(test_rtabmap
   ENV
     TEST_EXECUTABLE=${CMAKE_CURRENT_SOURCE_DIR}/test_rtabmap_node.py
 )
+
+nav2_add_test(test_rtabmap_localization
+  GENERATE_RESULT_FOR_RETURN_CODE_ZERO
+  COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/test_rtabmap_localization_launch.py"
+  TIMEOUT 420
+  ENV
+    TEST_EXECUTABLE=${CMAKE_CURRENT_SOURCE_DIR}/test_rtabmap_localization_node.py
+)
+
+# The localization test replays the database the mapping test writes, so it has
+# to run after it and only if it passed. A fixture expresses that to ctest;
+# plain test ordering would not, and the two must never run concurrently since
+# they share the database file.
+if(TARGET test_rtabmap OR TEST test_rtabmap)
+  set_tests_properties(test_rtabmap
+    PROPERTIES FIXTURES_SETUP rtabmap_database)
+  set_tests_properties(test_rtabmap_localization
+    PROPERTIES FIXTURES_REQUIRED rtabmap_database RUN_SERIAL TRUE)
+endif()
