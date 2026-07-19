@@ -79,6 +79,7 @@ bt_navigator:
       - compute_path
       - dock_robot
       - drive_on_heading
+      - escape_infeasible_area
       - follow_object
       - follow_path
       - nav_thru_poses
@@ -86,6 +87,7 @@ bt_navigator:
       - route
       - spin
       - smoother
+      - stop_slowly
       - undock_robot
       - wait
 
@@ -427,8 +429,13 @@ behavior_server:
     local_footprint_topic: local_costmap/published_footprint
     global_footprint_topic: global_costmap/published_footprint
     cycle_frequency: 10.0
+    # StopSlowly integrates its deceleration ramp with dt = 1/controller_frequency,
+    # but TimedBehavior ticks at cycle_frequency. Keep the two equal or the ramp is
+    # applied at the wrong rate.
+    controller_frequency: 10.0
     behavior_plugins:
-      ["spin", "backup", "drive_on_heading", "assisted_teleop", "wait"]
+      ["spin", "backup", "drive_on_heading", "assisted_teleop", "wait",
+       "stop_slowly", "escape_infeasible_area"]
     spin:
       plugin: "nav2_behaviors::Spin"
     backup:
@@ -445,6 +452,10 @@ behavior_server:
       plugin: "nav2_behaviors::Wait"
     assisted_teleop:
       plugin: "nav2_behaviors::AssistedTeleop"
+    stop_slowly:
+      plugin: "nav2_behaviors::StopSlowly"
+    escape_infeasible_area:
+      plugin: "nav2_behaviors::EscapeInfeasibleArea"
     local_frame: odom
     global_frame: map
     robot_base_frame: base_link
