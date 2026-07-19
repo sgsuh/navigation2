@@ -68,10 +68,6 @@ VelocitySmoother::on_configure(const rclcpp_lifecycle::State & state)
     "max_accel", std::vector<double>{2.5, 0.0, 3.2});
   max_decels_ = node->declare_or_get_parameter(
     "max_decel", std::vector<double>{-2.5, 0.0, -3.2});
-  accel_jerks_ = node->declare_or_get_parameter(
-    "accel_jerks", std::vector<double>{0.5, 0.0, 0.5});
-  decel_jerks_ = node->declare_or_get_parameter(
-    "decel_jerks", std::vector<double>{-0.5, 0.0, -0.5});
 
   // Get feature parameters
   odom_topic_ = node->declare_or_get_parameter("odom_topic", std::string("odom"));
@@ -90,32 +86,17 @@ VelocitySmoother::on_configure(const rclcpp_lifecycle::State & state)
     min_velocities_.size() != size ||
     max_accels_.size() != size ||
     max_decels_.size() != size ||
-    accel_jerks_.size() != size ||
-    decel_jerks_.size() != size ||
     deadband_velocities_.size() != size)
   {
     RCLCPP_ERROR(
       get_logger(),
-      "Invalid setting of kinematic, jerk and/or deadband limits!"
+      "Invalid setting of kinematic and/or deadband limits!"
       " All limits must be size of 3 (x, y, theta) or 6 (x, y, z, r, p, y)");
     on_cleanup(state);
     return nav2::CallbackReturn::FAILURE;
   }
 
-  // Current per-step velocity change (acceleration proxy), one per axis
-  current_accel_.assign(size, 0.0);
-
   for (unsigned int i = 0; i != size; i++) {
-    if (accel_jerks_[i] < 0.0) {
-      RCLCPP_ERROR(get_logger(), "Accel jerk values should be positive.");
-      on_cleanup(state);
-      return nav2::CallbackReturn::FAILURE;
-    }
-    if (decel_jerks_[i] > 0.0) {
-      RCLCPP_ERROR(get_logger(), "Decel jerk values should be negative.");
-      on_cleanup(state);
-      return nav2::CallbackReturn::FAILURE;
-    }
     if (max_decels_[i] > 0.0) {
       RCLCPP_ERROR(
         get_logger(),
@@ -279,43 +260,30 @@ void VelocitySmoother::inputCommandCallback(
 }
 
 // Compute the per-step velocity-change window [v_component_min, v_component_max]
-// bounded by both the acceleration limits and, tightened further, the jerk limits
-// around the current acceleration proxy accel_curr.
+// bounded by the acceleration limits.
 static void computeVelocityComponentBounds(
-  const double v_curr, const double v_cmd, const double accel_curr,
+  const double v_curr, const double v_cmd,
   const double decel, const double accel,
-  const double decel_jerk, const double accel_jerk,
   const double smoothing_frequency,
   double & v_component_max, double & v_component_min)
 {
-  double accel_v_component_max, jerk_v_component_max;
-  double accel_v_component_min, jerk_v_component_min;
-
   // Accelerating if magnitude of v_cmd is above magnitude of v_curr
   // and if v_cmd and v_curr have the same sign (i.e. speed is NOT passing through 0.0)
   // Decelerating otherwise
   if (std::abs(v_cmd) >= std::abs(v_curr) && v_curr * v_cmd >= 0.0) {
     // accelerating
-    accel_v_component_max = accel / smoothing_frequency;
-    jerk_v_component_max = (accel_curr + accel_jerk) / smoothing_frequency;
-    accel_v_component_min = -accel / smoothing_frequency;
-    jerk_v_component_min = (accel_curr - accel_jerk) / smoothing_frequency;
+    v_component_max = accel / smoothing_frequency;
+    v_component_min = -accel / smoothing_frequency;
   } else {
     // decelerating
-    accel_v_component_max = -decel / smoothing_frequency;
-    jerk_v_component_max = (accel_curr - decel_jerk) / smoothing_frequency;
-    accel_v_component_min = decel / smoothing_frequency;
-    jerk_v_component_min = (accel_curr + decel_jerk) / smoothing_frequency;
+    v_component_max = -decel / smoothing_frequency;
+    v_component_min = decel / smoothing_frequency;
   }
-
-  v_component_max = std::clamp(jerk_v_component_max, accel_v_component_min, accel_v_component_max);
-  v_component_min = std::clamp(jerk_v_component_min, accel_v_component_min, accel_v_component_max);
 }
 
 double VelocitySmoother::findEtaConstraint(
   const double v_curr, const double v_cmd,
-  const double accel, const double decel,
-  const double accel_curr, const double decel_jerk, const double accel_jerk)
+  const double accel, const double decel)
 {
   // Exploiting vector scaling properties
   double dv = v_cmd - v_curr;
@@ -323,8 +291,7 @@ double VelocitySmoother::findEtaConstraint(
   double v_component_max;
   double v_component_min;
   computeVelocityComponentBounds(
-    v_curr, v_cmd, accel_curr, decel, accel, decel_jerk, accel_jerk,
-    smoothing_frequency_, v_component_max, v_component_min);
+    v_curr, v_cmd, decel, accel, smoothing_frequency_, v_component_max, v_component_min);
 
   if (dv > v_component_max) {
     return v_component_max / dv;
@@ -339,16 +306,14 @@ double VelocitySmoother::findEtaConstraint(
 
 double VelocitySmoother::applyConstraints(
   const double v_curr, const double v_cmd,
-  const double accel, const double decel, const double eta,
-  const double accel_curr, const double decel_jerk, const double accel_jerk)
+  const double accel, const double decel, const double eta)
 {
   double dv = v_cmd - v_curr;
 
   double v_component_max;
   double v_component_min;
   computeVelocityComponentBounds(
-    v_curr, v_cmd, accel_curr, decel, accel, decel_jerk, accel_jerk,
-    smoothing_frequency_, v_component_max, v_component_min);
+    v_curr, v_cmd, decel, accel, smoothing_frequency_, v_component_max, v_component_min);
 
   return v_curr + std::clamp(eta * dv, v_component_min, v_component_max);
 }
@@ -385,23 +350,8 @@ void VelocitySmoother::smootherTimer()
   // Get current velocity based on feedback type
   if (open_loop_) {
     current_twist_ = last_cmd_;
-    // In open loop, the acceleration proxy is updated at the end from the cmd delta.
   } else {
-    // Update the per-axis acceleration proxy (per-step velocity delta) before velocity
-    auto twist = odom_smoother_->getTwistStamped();
-    if (!is_6dof_) {
-      current_accel_[0] = twist.twist.linear.x - current_twist_.twist.linear.x;
-      current_accel_[1] = twist.twist.linear.y - current_twist_.twist.linear.y;
-      current_accel_[2] = twist.twist.angular.z - current_twist_.twist.angular.z;
-    } else {
-      current_accel_[0] = twist.twist.linear.x - current_twist_.twist.linear.x;
-      current_accel_[1] = twist.twist.linear.y - current_twist_.twist.linear.y;
-      current_accel_[2] = twist.twist.linear.z - current_twist_.twist.linear.z;
-      current_accel_[3] = twist.twist.angular.x - current_twist_.twist.angular.x;
-      current_accel_[4] = twist.twist.angular.y - current_twist_.twist.angular.y;
-      current_accel_[5] = twist.twist.angular.z - current_twist_.twist.angular.z;
-    }
-    current_twist_ = twist;
+    current_twist_ = odom_smoother_->getTwistStamped();
   }
 
   // Apply absolute velocity restrictions to the command
@@ -446,64 +396,55 @@ void VelocitySmoother::smootherTimer()
     double curr_eta = -1.0;
     if (!is_6dof_) {
       curr_eta = findEtaConstraint(
-        current_twist_.twist.linear.x, command_.twist.linear.x, max_accels_[0], max_decels_[0],
-        current_accel_[0], decel_jerks_[0], accel_jerks_[0]);
+        current_twist_.twist.linear.x, command_.twist.linear.x, max_accels_[0], max_decels_[0]);
       if (curr_eta > 0.0 && std::fabs(1.0 - curr_eta) > std::fabs(1.0 - eta)) {
         eta = curr_eta;
       }
 
       curr_eta = findEtaConstraint(
-        current_twist_.twist.linear.y, command_.twist.linear.y, max_accels_[1], max_decels_[1],
-        current_accel_[1], decel_jerks_[1], accel_jerks_[1]);
+        current_twist_.twist.linear.y, command_.twist.linear.y, max_accels_[1], max_decels_[1]);
       if (curr_eta > 0.0 && std::fabs(1.0 - curr_eta) > std::fabs(1.0 - eta)) {
         eta = curr_eta;
       }
 
       curr_eta = findEtaConstraint(
-        current_twist_.twist.angular.z, command_.twist.angular.z, max_accels_[2], max_decels_[2],
-        current_accel_[2], decel_jerks_[2], accel_jerks_[2]);
+        current_twist_.twist.angular.z, command_.twist.angular.z, max_accels_[2], max_decels_[2]);
       if (curr_eta > 0.0 && std::fabs(1.0 - curr_eta) > std::fabs(1.0 - eta)) {
         eta = curr_eta;
       }
     } else {
       curr_eta = findEtaConstraint(
-        current_twist_.twist.linear.x, command_.twist.linear.x, max_accels_[0], max_decels_[0],
-        current_accel_[0], decel_jerks_[0], accel_jerks_[0]);
+        current_twist_.twist.linear.x, command_.twist.linear.x, max_accels_[0], max_decels_[0]);
       if (curr_eta > 0.0 && std::fabs(1.0 - curr_eta) > std::fabs(1.0 - eta)) {
         eta = curr_eta;
       }
 
       curr_eta = findEtaConstraint(
-        current_twist_.twist.linear.y, command_.twist.linear.y, max_accels_[1], max_decels_[1],
-        current_accel_[1], decel_jerks_[1], accel_jerks_[1]);
+        current_twist_.twist.linear.y, command_.twist.linear.y, max_accels_[1], max_decels_[1]);
       if (curr_eta > 0.0 && std::fabs(1.0 - curr_eta) > std::fabs(1.0 - eta)) {
         eta = curr_eta;
       }
 
       curr_eta = findEtaConstraint(
-        current_twist_.twist.linear.z, command_.twist.linear.z, max_accels_[2], max_decels_[2],
-        current_accel_[2], decel_jerks_[2], accel_jerks_[2]);
+        current_twist_.twist.linear.z, command_.twist.linear.z, max_accels_[2], max_decels_[2]);
       if (curr_eta > 0.0 && std::fabs(1.0 - curr_eta) > std::fabs(1.0 - eta)) {
         eta = curr_eta;
       }
 
       curr_eta = findEtaConstraint(
-        current_twist_.twist.angular.x, command_.twist.angular.x, max_accels_[3], max_decels_[3],
-        current_accel_[3], decel_jerks_[3], accel_jerks_[3]);
+        current_twist_.twist.angular.x, command_.twist.angular.x, max_accels_[3], max_decels_[3]);
       if (curr_eta > 0.0 && std::fabs(1.0 - curr_eta) > std::fabs(1.0 - eta)) {
         eta = curr_eta;
       }
 
       curr_eta = findEtaConstraint(
-        current_twist_.twist.angular.y, command_.twist.angular.y, max_accels_[4], max_decels_[4],
-        current_accel_[4], decel_jerks_[4], accel_jerks_[4]);
+        current_twist_.twist.angular.y, command_.twist.angular.y, max_accels_[4], max_decels_[4]);
       if (curr_eta > 0.0 && std::fabs(1.0 - curr_eta) > std::fabs(1.0 - eta)) {
         eta = curr_eta;
       }
 
       curr_eta = findEtaConstraint(
-        current_twist_.twist.angular.z, command_.twist.angular.z, max_accels_[5], max_decels_[5],
-        current_accel_[5], decel_jerks_[5], accel_jerks_[5]);
+        current_twist_.twist.angular.z, command_.twist.angular.z, max_accels_[5], max_decels_[5]);
       if (curr_eta > 0.0 && std::fabs(1.0 - curr_eta) > std::fabs(1.0 - eta)) {
         eta = curr_eta;
       }
@@ -512,33 +453,28 @@ void VelocitySmoother::smootherTimer()
 
   if (!is_6dof_) {
     cmd_vel->twist.linear.x = applyConstraints(
-      current_twist_.twist.linear.x, command_.twist.linear.x, max_accels_[0], max_decels_[0], eta,
-      current_accel_[0], decel_jerks_[0], accel_jerks_[0]);
+      current_twist_.twist.linear.x, command_.twist.linear.x, max_accels_[0], max_decels_[0], eta);
     cmd_vel->twist.linear.y = applyConstraints(
-      current_twist_.twist.linear.y, command_.twist.linear.y, max_accels_[1], max_decels_[1], eta,
-      current_accel_[1], decel_jerks_[1], accel_jerks_[1]);
+      current_twist_.twist.linear.y, command_.twist.linear.y, max_accels_[1], max_decels_[1], eta);
     cmd_vel->twist.angular.z = applyConstraints(
-      current_twist_.twist.angular.z, command_.twist.angular.z, max_accels_[2], max_decels_[2], eta,
-      current_accel_[2], decel_jerks_[2], accel_jerks_[2]);
+      current_twist_.twist.angular.z, command_.twist.angular.z, max_accels_[2],
+      max_decels_[2], eta);
   } else {
     cmd_vel->twist.linear.x = applyConstraints(
-      current_twist_.twist.linear.x, command_.twist.linear.x, max_accels_[0], max_decels_[0], eta,
-      current_accel_[0], decel_jerks_[0], accel_jerks_[0]);
+      current_twist_.twist.linear.x, command_.twist.linear.x, max_accels_[0], max_decels_[0], eta);
     cmd_vel->twist.linear.y = applyConstraints(
-      current_twist_.twist.linear.y, command_.twist.linear.y, max_accels_[1], max_decels_[1], eta,
-      current_accel_[1], decel_jerks_[1], accel_jerks_[1]);
+      current_twist_.twist.linear.y, command_.twist.linear.y, max_accels_[1], max_decels_[1], eta);
     cmd_vel->twist.linear.z = applyConstraints(
-      current_twist_.twist.linear.z, command_.twist.linear.z, max_accels_[2], max_decels_[2], eta,
-      current_accel_[2], decel_jerks_[2], accel_jerks_[2]);
+      current_twist_.twist.linear.z, command_.twist.linear.z, max_accels_[2], max_decels_[2], eta);
     cmd_vel->twist.angular.x = applyConstraints(
-      current_twist_.twist.angular.x, command_.twist.angular.x, max_accels_[3], max_decels_[3], eta,
-      current_accel_[3], decel_jerks_[3], accel_jerks_[3]);
+      current_twist_.twist.angular.x, command_.twist.angular.x, max_accels_[3],
+      max_decels_[3], eta);
     cmd_vel->twist.angular.y = applyConstraints(
-      current_twist_.twist.angular.y, command_.twist.angular.y, max_accels_[4], max_decels_[4], eta,
-      current_accel_[4], decel_jerks_[4], accel_jerks_[4]);
+      current_twist_.twist.angular.y, command_.twist.angular.y, max_accels_[4],
+      max_decels_[4], eta);
     cmd_vel->twist.angular.z = applyConstraints(
-      current_twist_.twist.angular.z, command_.twist.angular.z, max_accels_[5], max_decels_[5], eta,
-      current_accel_[5], decel_jerks_[5], accel_jerks_[5]);
+      current_twist_.twist.angular.z, command_.twist.angular.z, max_accels_[5],
+      max_decels_[5], eta);
   }
 
 
@@ -595,21 +531,6 @@ void VelocitySmoother::smootherTimer()
       std::clamp(cmd_vel->twist.angular.z, min_velocities_[5], max_velocities_[5]);
   }
 
-  // In open loop, update the per-axis acceleration proxy from the change in output command
-  if (open_loop_) {
-    if (!is_6dof_) {
-      current_accel_[0] = cmd_vel->twist.linear.x - last_cmd_.twist.linear.x;
-      current_accel_[1] = cmd_vel->twist.linear.y - last_cmd_.twist.linear.y;
-      current_accel_[2] = cmd_vel->twist.angular.z - last_cmd_.twist.angular.z;
-    } else {
-      current_accel_[0] = cmd_vel->twist.linear.x - last_cmd_.twist.linear.x;
-      current_accel_[1] = cmd_vel->twist.linear.y - last_cmd_.twist.linear.y;
-      current_accel_[2] = cmd_vel->twist.linear.z - last_cmd_.twist.linear.z;
-      current_accel_[3] = cmd_vel->twist.angular.x - last_cmd_.twist.angular.x;
-      current_accel_[4] = cmd_vel->twist.angular.y - last_cmd_.twist.angular.y;
-      current_accel_[5] = cmd_vel->twist.angular.z - last_cmd_.twist.angular.z;
-    }
-  }
   last_cmd_ = *cmd_vel;
 
   smoothed_cmd_pub_->publish(std::move(cmd_vel));

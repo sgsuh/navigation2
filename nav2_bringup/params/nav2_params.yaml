@@ -506,8 +506,11 @@ velocity_smoother:
     feedback: "OPEN_LOOP"
     max_velocity: [0.5, 0.0, 2.0]
     min_velocity: [-0.5, 0.0, -2.0]
-    max_accel: [2.5, 0.0, 3.2]
-    max_decel: [-2.5, 0.0, -3.2]
+    # These reproduce the acceleration the removed accel_jerks/decel_jerks feature actually
+    # imposed (~0.53 m/s^2 and rad/s^2), which had silently overridden the 2.5/3.2 set here.
+    # Unlike before, these now take effect and can be tuned directly.
+    max_accel: [0.53, 0.0, 0.53]
+    max_decel: [-0.53, 0.0, -0.53]
     odom_topic: "odom"
     odom_duration: 0.1
     deadband_velocity: [0.0, 0.0, 0.0]

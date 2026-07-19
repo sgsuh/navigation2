@@ -53,43 +53,29 @@ public:
   ~VelocitySmoother();
 
   /**
-   * @brief Find the scale factor, eta, which scales axis into acceleration and jerk range.
-   * The jerk parameters default to a non-binding range so that omitting them reproduces the
-   * pure acceleration-limited behavior.
+   * @brief Find the scale factor, eta, which scales axis into acceleration range
    * @param v_curr current velocity
    * @param v_cmd commanded velocity
    * @param accel maximum acceleration
    * @param decel maximum deceleration
-   * @param accel_curr current per-step velocity change (proxy for current acceleration)
-   * @param decel_jerk maximum deceleration jerk (negative)
-   * @param accel_jerk maximum acceleration jerk (positive)
    * @return Scale factor, eta
    */
   double findEtaConstraint(
     const double v_curr, const double v_cmd,
-    const double accel, const double decel,
-    const double accel_curr = 0.0,
-    const double decel_jerk = -1e9, const double accel_jerk = 1e9);
+    const double accel, const double decel);
 
   /**
-   * @brief Apply acceleration, jerk and scale factor constraints.
-   * The jerk parameters default to a non-binding range so that omitting them reproduces the
-   * pure acceleration-limited behavior.
+   * @brief Apply acceleration and scale factor constraints
    * @param v_curr current velocity
    * @param v_cmd commanded velocity
    * @param accel maximum acceleration
    * @param decel maximum deceleration
    * @param eta Scale factor
-   * @param accel_curr current per-step velocity change (proxy for current acceleration)
-   * @param decel_jerk maximum deceleration jerk (negative)
-   * @param accel_jerk maximum acceleration jerk (positive)
    * @return Velocity command
    */
   double applyConstraints(
     const double v_curr, const double v_cmd,
-    const double accel, const double decel, const double eta,
-    const double accel_curr = 0.0,
-    const double decel_jerk = -1e9, const double accel_jerk = 1e9);
+    const double accel, const double decel, const double eta);
 
 protected:
   /**
@@ -167,8 +153,6 @@ protected:
   rclcpp::Clock::SharedPtr clock_;
   geometry_msgs::msg::TwistStamped last_cmd_;
   geometry_msgs::msg::TwistStamped current_twist_;
-  // Current per-step velocity change per axis (proxy for current acceleration), size 3 or 6
-  std::vector<double> current_accel_;
   geometry_msgs::msg::TwistStamped command_;
 
   // Parameters
@@ -185,8 +169,6 @@ protected:
   std::vector<double> min_velocities_;
   std::vector<double> max_accels_;
   std::vector<double> max_decels_;
-  std::vector<double> accel_jerks_;
-  std::vector<double> decel_jerks_;
   std::vector<double> deadband_velocities_;
   rclcpp::Duration velocity_timeout_{0, 0};
   rclcpp::Time last_command_time_;
