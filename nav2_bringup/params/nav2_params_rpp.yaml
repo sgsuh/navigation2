@@ -519,13 +519,21 @@ collision_monitor:
     polygons: ["PolygonStop", "FootprintApproach"]
     # Static-points STOP polygon in front of the robot: hard-stops if a source point
     # falls inside the zone. Starts DISABLED so it does not interfere with baseline
-    # shim+RPP driving; enable it during the collision_monitor step of the sequencing
-    # (SESSION_HANDOFF.md). This is a static `points` polygon (a *string*), which is the
+    # shim+RPP driving. This is a static `points` polygon (a *string*), which is the
     # only shape expand_on_stop's precompute gate accepts if that toggle is ever added.
     # expand_on_stop itself is intentionally NOT set here (see the trap in SESSION_HANDOFF).
+    #
+    # SIZING (must be tuned to the real robot before enabling): the box is in base_link,
+    # x forward. Half-width must be close to the robot's half-width (robot_radius is 0.22)
+    # and NOT much larger, or the side edges sit outside the robot's own swept path and the
+    # zone catches corridor/doorway walls the robot itself clears -- which wedges the robot
+    # (it stops before it can move). Forward extent should cover the robot's front plus its
+    # stopping distance v^2/(2*decel); at max 0.5 m/s and 0.53 m/s^2 that is ~0.22 + 0.24 =
+    # ~0.46 m. The values below (half-width 0.24, forward 0.45) follow that and clear the
+    # narrow tb3_sandbox corridors in sim; widen/lengthen only with matching clearance.
     PolygonStop:
       type: "polygon"
-      points: "[[0.3, 0.3], [0.3, -0.3], [0.0, -0.3], [0.0, 0.3]]"
+      points: "[[0.45, 0.24], [0.45, -0.24], [0.0, -0.24], [0.0, 0.24]]"
       action_type: "stop"
       min_points: 4
       visualize: true
