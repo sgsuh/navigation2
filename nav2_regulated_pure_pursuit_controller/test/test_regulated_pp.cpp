@@ -681,6 +681,182 @@ TEST(RegulatedPurePursuitTest, testObstacleBeyondGoal)
   ctrl->cleanup();
 }
 
+// Ported feature: use_path_collision_detection. When enabled, computeVelocityCommands scans
+// the upcoming path for costmap collisions and stops (within min_dist_to_path_collision) or
+// slows before the obstacle. Here a lethal cell sits 0.3 m ahead on a straight path (inside
+// the 0.5 m default stop distance): enabled -> full stop; disabled -> the branch is skipped
+// and the robot keeps moving. This ported branch had no unit coverage before.
+TEST(RegulatedPurePursuitTest, pathCollisionDetectionStops)
+{
+  auto ctrl = std::make_shared<BasicAPIRPP>();
+  auto node = std::make_shared<nav2::LifecycleNode>("testRPP");
+  std::string name = "PathFollower";
+  auto tf = std::make_shared<tf2_ros::Buffer>(node->get_clock());
+  auto costmap = std::make_shared<nav2_costmap_2d::Costmap2DROS>("fake_costmap");
+  rclcpp_lifecycle::State state;
+  costmap->on_configure(state);
+
+  // Isolate the path-collision branch: disable the carrot collision check (so it cannot throw
+  // NoValidControl first) and cost regulation (so the obstacle-free baseline speed stays
+  // clearly non-zero rather than being scaled down near the lethal cell).
+  nav2::declare_parameter_if_not_declared(
+    node, name + ".use_collision_detection", rclcpp::ParameterValue(false));
+  nav2::declare_parameter_if_not_declared(
+    node, name + ".use_cost_regulated_linear_velocity_scaling", rclcpp::ParameterValue(false));
+  nav2::declare_parameter_if_not_declared(
+    node, name + ".use_path_collision_detection", rclcpp::ParameterValue(true));
+  // min_dist_to_path_collision defaults to 0.5 m; the obstacle sits inside it -> full stop.
+
+  ctrl->configure(node, name, tf, costmap);
+  ctrl->activate();
+  nav2_controller::FeasiblePathHandler path_handler;
+  path_handler.initialize(node, node->get_logger(), "path_handler", costmap, tf);
+
+  auto * raw_costmap = costmap->getCostmap();
+  const double resolution = raw_costmap->getResolution();
+  const double robot_x = raw_costmap->getOriginX() +
+    (raw_costmap->getSizeInCellsX() * resolution) / 2.0;
+  const double robot_y = raw_costmap->getOriginY() +
+    (raw_costmap->getSizeInCellsY() * resolution) / 2.0;
+  const std::string global_frame = costmap->getGlobalFrameID();
+  const auto stamp = node->get_clock()->now();
+
+  // Straight 1 m path ahead of the robot, in the costmap/global frame.
+  geometry_msgs::msg::PoseStamped start_pose;
+  start_pose.header.frame_id = global_frame;
+  start_pose.header.stamp = stamp;
+  start_pose.pose.position.x = robot_x;
+  start_pose.pose.position.y = robot_y;
+  start_pose.pose.orientation.w = 1.0;
+  auto plan = path_utils::generate_path(
+    start_pose, 0.05, {std::make_unique<path_utils::Straight>(1.0)});
+  ctrl->newPathReceived(plan);
+  path_handler.setPlan(plan);
+
+  // Robot sits at the costmap centre; base_link is offset from the global frame by that.
+  geometry_msgs::msg::TransformStamped global_to_base;
+  global_to_base.header.stamp = stamp;
+  global_to_base.header.frame_id = global_frame;
+  global_to_base.child_frame_id = "base_link";
+  global_to_base.transform.translation.x = robot_x;
+  global_to_base.transform.translation.y = robot_y;
+  global_to_base.transform.rotation.w = 1.0;
+  tf->setTransform(global_to_base, "rpp-path-collision-test");
+
+  // Lethal cell 0.3 m ahead on the path (< min_dist_to_path_collision = 0.5 m).
+  unsigned int obs_mx, obs_my;
+  raw_costmap->worldToMap(robot_x + 0.3, robot_y, obs_mx, obs_my);
+  raw_costmap->setCost(obs_mx, obs_my, nav2_costmap_2d::LETHAL_OBSTACLE);
+
+  geometry_msgs::msg::PoseStamped robot_pose;
+  robot_pose.header.frame_id = "base_link";
+  robot_pose.header.stamp = stamp;
+  robot_pose.pose.orientation.w = 1.0;
+  geometry_msgs::msg::Twist current_speed;
+  nav2_controller::SimpleGoalChecker checker;
+  checker.initialize(node, "checker", costmap);
+
+  auto command_linear_vel = [&]() {
+      auto [closest, pruned_end] = path_handler.findPlanSegment(robot_pose);
+      auto transformed = path_handler.transformLocalPlan(closest, pruned_end);
+      auto goal = path_handler.getTransformedGoal(robot_pose.header.stamp);
+      return ctrl->computeVelocityCommands(
+        robot_pose, current_speed, &checker, transformed, goal).twist.linear.x;
+    };
+
+  // Enabled: the obstacle 0.3 m ahead forces a full stop.
+  EXPECT_DOUBLE_EQ(command_linear_vel(), 0.0);
+
+  // Disabled: the same obstacle is ignored by this branch, so the robot keeps moving.
+  node->set_parameter(rclcpp::Parameter(name + ".use_path_collision_detection", false));
+  ctrl->configure(node, name, tf, costmap);
+  ctrl->activate();
+  ctrl->newPathReceived(plan);
+  EXPECT_GT(command_linear_vel(), 0.1);
+
+  ctrl->deactivate();
+  ctrl->cleanup();
+}
+
+// Ported feature: temp_allow_reversing_goal_proximity. When enabled and the robot is within
+// temp_allow_reversing_dist of the goal, reversing is temporarily permitted so a slightly
+// overshot goal can still be reached: with the lookahead carrot behind the robot, x_vel_sign
+// flips to -1 and the command reverses. When disabled the robot cannot reverse, so with the
+// carrot behind it it rotates in place instead (linear = 0). This ported branch had no unit
+// coverage before. The transformed plan is supplied directly (bypassing the path handler) so
+// the carrot-behind / near-goal geometry can be constructed exactly.
+TEST(RegulatedPurePursuitTest, tempAllowReversingNearGoal)
+{
+  auto ctrl = std::make_shared<BasicAPIRPP>();
+  auto node = std::make_shared<nav2::LifecycleNode>("testRPP");
+  std::string name = "PathFollower";
+  auto tf = std::make_shared<tf2_ros::Buffer>(node->get_clock());
+  auto costmap = std::make_shared<nav2_costmap_2d::Costmap2DROS>("fake_costmap");
+  rclcpp_lifecycle::State state;
+  costmap->on_configure(state);
+
+  // Isolate the reversing decision: no carrot collision check, no cost regulation.
+  nav2::declare_parameter_if_not_declared(
+    node, name + ".use_collision_detection", rclcpp::ParameterValue(false));
+  nav2::declare_parameter_if_not_declared(
+    node, name + ".use_cost_regulated_linear_velocity_scaling", rclcpp::ParameterValue(false));
+  nav2::declare_parameter_if_not_declared(
+    node, name + ".temp_allow_reversing_goal_proximity", rclcpp::ParameterValue(true));
+  // temp_allow_reversing_dist defaults to 0.3 m.
+
+  ctrl->configure(node, name, tf, costmap);
+  ctrl->activate();
+
+  const auto stamp = node->get_clock()->now();
+
+  // Base-frame plan running straight backwards (-x): the lookahead carrot lands behind the
+  // robot, and the goal (path end at -0.28 m) sits inside temp_allow_reversing_dist (0.3 m)
+  // but outside the 0.25 m xy goal tolerance (so rotate-to-goal-heading does not pre-empt).
+  nav_msgs::msg::Path transformed_plan;
+  transformed_plan.header.frame_id = "base_link";
+  transformed_plan.header.stamp = stamp;
+  for (unsigned int i = 0; i < 15; ++i) {
+    geometry_msgs::msg::PoseStamped p;
+    p.header.frame_id = "base_link";
+    p.pose.position.x = -0.02 * i;  // (0,0) .. (-0.28, 0)
+    p.pose.orientation.w = 1.0;
+    transformed_plan.poses.push_back(p);
+  }
+
+  geometry_msgs::msg::PoseStamped robot_pose;
+  robot_pose.header.frame_id = "base_link";
+  robot_pose.header.stamp = stamp;
+  robot_pose.pose.orientation.w = 1.0;
+
+  geometry_msgs::msg::PoseStamped goal;  // in the robot frame -> identity transform
+  goal.header.frame_id = "base_link";
+  goal.header.stamp = stamp;
+  goal.pose.position.x = -0.28;
+  goal.pose.orientation.w = 1.0;
+
+  geometry_msgs::msg::Twist current_speed;
+  nav2_controller::SimpleGoalChecker checker;
+  checker.initialize(node, "checker", costmap);
+
+  // Enabled: within 0.3 m of the goal with the carrot behind -> reverse (negative linear).
+  auto reversing = ctrl->computeVelocityCommands(
+    robot_pose, current_speed, &checker, transformed_plan, goal);
+  EXPECT_LT(reversing.twist.linear.x, 0.0);
+
+  // Disabled: reversing not allowed, so with the carrot behind the robot rotates in place.
+  node->set_parameter(
+    rclcpp::Parameter(name + ".temp_allow_reversing_goal_proximity", false));
+  ctrl->configure(node, name, tf, costmap);
+  ctrl->activate();
+  auto rotating = ctrl->computeVelocityCommands(
+    robot_pose, current_speed, &checker, transformed_plan, goal);
+  EXPECT_DOUBLE_EQ(rotating.twist.linear.x, 0.0);
+  EXPECT_NE(rotating.twist.angular.z, 0.0);
+
+  ctrl->deactivate();
+  ctrl->cleanup();
+}
+
 TEST(RegulatedPurePursuitTest, testParameterWarnings)
 {
   auto ctrl = std::make_shared<BasicAPIRPP>();

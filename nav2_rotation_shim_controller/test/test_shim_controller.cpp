@@ -26,6 +26,7 @@
 #include "nav2_controller/plugins/simple_goal_checker.hpp"
 #include "nav2_controller/plugins/feasible_path_handler.hpp"
 #include "nav2_rotation_shim_controller/nav2_rotation_shim_controller.hpp"
+#include "nav2_core/controller_exceptions.hpp"
 #include "tf2_ros/transform_broadcaster.hpp"
 
 class RotationShimShim : public nav2_rotation_shim_controller::RotationShimController
@@ -64,6 +65,18 @@ public:
     const geometry_msgs::msg::Twist & velocity)
   {
     return computeRotateToHeadingCommand(param, pose, velocity);
+  }
+
+  // getSampledPathPt reads the protected current_path_/current_pose_ members, which
+  // are otherwise only set from inside computeVelocityCommands. Setting them directly
+  // lets the ported path-deviation check be exercised without routing through the
+  // primary controller (whose own rotate-to-heading would otherwise mask the effect).
+  void setPathAndPoseForTest(
+    const nav_msgs::msg::Path & path,
+    const geometry_msgs::msg::PoseStamped & pose)
+  {
+    current_path_ = path;
+    current_pose_ = pose;
   }
 };
 
@@ -150,6 +163,105 @@ TEST(RotationShimControllerTest, setPlanAndSampledPointsTests)
   auto pose = controller->getSampledPathPtWrapper(global_goal);
   EXPECT_EQ(pose.pose.position.x, 1.0);  // default forward sampling is 0.5
   EXPECT_EQ(pose.pose.position.y, 1.0);
+}
+
+// Ported feature: max_dist_from_path. When > 0, getSampledPathPt rejects the path with
+// nav2_core::InvalidPath if the robot has strayed farther than the tolerance from the
+// nearest path point; when the robot is on the path it samples normally. (<= 0 disables
+// the check, which is covered by every other test here since the default is 0.0.)
+TEST(RotationShimControllerTest, pathDeviationCheck)
+{
+  auto node = std::make_shared<nav2::LifecycleNode>("ShimControllerTest");
+  std::string name = "PathFollower";
+  auto tf = std::make_shared<tf2_ros::Buffer>(node->get_clock());
+  auto costmap = std::make_shared<nav2_costmap_2d::Costmap2DROS>("fake_costmap");
+  rclcpp_lifecycle::State state;
+  costmap->on_configure(state);
+
+  node->declare_parameter(
+    "PathFollower.primary_controller.plugin",
+    std::string("nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"));
+  node->declare_parameter("PathFollower.simulate_ahead_time", 0.0);
+  // Enable the ported path-deviation check with a 0.5 m tolerance.
+  node->declare_parameter("PathFollower.max_dist_from_path", 0.5);
+
+  auto controller = std::make_shared<RotationShimShim>();
+  controller->configure(node, name, tf, costmap);
+  controller->activate();
+
+  // A short path along +x near the origin, expressed in base_link so the pose->path-frame
+  // transform inside getSampledPathPt is identity (no TF server required).
+  nav_msgs::msg::Path path;
+  path.header.frame_id = "base_link";
+  path.poses.resize(6);
+  for (unsigned int i = 0; i < path.poses.size(); ++i) {
+    path.poses[i].header.frame_id = "base_link";
+    path.poses[i].pose.position.x = 0.2 * i;  // (0,0) .. (1.0, 0)
+    path.poses[i].pose.position.y = 0.0;
+  }
+  geometry_msgs::msg::PoseStamped goal = path.poses.back();
+
+  // On the path (distance 0 < 0.5 m): the deviation check passes and a point is sampled.
+  geometry_msgs::msg::PoseStamped on_path;
+  on_path.header.frame_id = "base_link";
+  controller->setPathAndPoseForTest(path, on_path);
+  EXPECT_NO_THROW(controller->getSampledPathPtWrapper(goal));
+
+  // 2 m off the path (nearest point 2.0 m away, > 0.5 m): rejected as InvalidPath.
+  geometry_msgs::msg::PoseStamped off_path;
+  off_path.header.frame_id = "base_link";
+  off_path.pose.position.y = 2.0;
+  controller->setPathAndPoseForTest(path, off_path);
+  EXPECT_THROW(controller->getSampledPathPtWrapper(goal), nav2_core::InvalidPath);
+}
+
+// Ported feature: avoid_overshoot. When enabled, computeRotateToHeadingCommand ramps the
+// angular speed linearly from min_angular_vel to rotate_to_heading_angular_vel as the
+// remaining heading error sweeps from stop_slowdown_threshold to start_slowdown_threshold,
+// holding min_angular_vel below the stop threshold (instead of the default sqrt decel curve).
+TEST(RotationShimControllerTest, avoidOvershootRamp)
+{
+  auto node = std::make_shared<nav2::LifecycleNode>("ShimControllerTest");
+  std::string name = "PathFollower";
+  auto tf = std::make_shared<tf2_ros::Buffer>(node->get_clock());
+  auto costmap = std::make_shared<nav2_costmap_2d::Costmap2DROS>("fake_costmap", "/", false);
+  costmap->configure();
+
+  node->declare_parameter(
+    "PathFollower.primary_controller.plugin",
+    std::string("nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"));
+  node->declare_parameter("controller_frequency", 1.0);  // dt = 1 s -> generous accel headroom
+  node->declare_parameter("PathFollower.simulate_ahead_time", 0.0);  // skip the collision check
+  node->declare_parameter("PathFollower.avoid_overshoot", true);
+  node->declare_parameter("PathFollower.min_angular_vel", 0.1);
+  node->declare_parameter("PathFollower.start_slowdown_threshold", 0.7);
+  node->declare_parameter("PathFollower.stop_slowdown_threshold", 0.2);
+  // rotate_to_heading_angular_vel defaults to 1.8; max_angular_accel to 3.2.
+
+  auto controller = std::make_shared<RotationShimShim>();
+  controller->configure(node, name, tf, costmap);
+  controller->activate();
+
+  const geometry_msgs::msg::Twist zero_vel;  // current angular velocity 0
+  geometry_msgs::msg::PoseStamped pose;
+  pose.header.frame_id = "base_link";
+
+  // >= start_slowdown_threshold (0.7): full speed, 0.1 + 1.0 * (1.8 - 0.1) = 1.8
+  EXPECT_NEAR(
+    controller->computeRotateToHeadingCommandWrapper(0.7, pose, zero_vel).twist.angular.z,
+    1.8, 1e-3);
+  // midpoint (0.45): factor 0.5, 0.1 + 0.5 * (1.8 - 0.1) = 0.95
+  EXPECT_NEAR(
+    controller->computeRotateToHeadingCommandWrapper(0.45, pose, zero_vel).twist.angular.z,
+    0.95, 1e-3);
+  // at stop_slowdown_threshold (0.2): factor 0, floored at min_angular_vel 0.1
+  EXPECT_NEAR(
+    controller->computeRotateToHeadingCommandWrapper(0.2, pose, zero_vel).twist.angular.z,
+    0.1, 1e-3);
+  // below the stop threshold: still floored at min_angular_vel, sign follows the error
+  EXPECT_NEAR(
+    controller->computeRotateToHeadingCommandWrapper(-0.1, pose, zero_vel).twist.angular.z,
+    -0.1, 1e-3);
 }
 
 TEST(RotationShimControllerTest, rotationAndTransformTests)
