@@ -334,17 +334,31 @@ geometry_msgs::msg::TwistStamped RegulatedPurePursuitController::computeVelocity
           path_pose_costmap.pose.position.x, path_pose_costmap.pose.position.y, yaw))
       {
         collision = true;
+        const double prev_linear_vel = linear_vel;
         if (integrated_len < params_->min_dist_to_path_collision) {
-          RCLCPP_WARN(logger_, "Collision %.2f m ahead on path: stopping.", integrated_len);
           linear_vel = 0.0;
         } else {
           const double safe_linear_vel =
             (integrated_len - params_->min_dist_to_path_collision) /
             params_->min_time_to_path_collision;
           linear_vel = std::min(linear_vel, safe_linear_vel);
-          RCLCPP_WARN(
-            logger_, "Collision %.2f m ahead on path: slowing to %.2f m/s.",
-            integrated_len, linear_vel);
+        }
+        // Only warn when this check actually reduced the commanded speed. Otherwise the
+        // message is misleading: the derived safe speed can already exceed the command (so
+        // min() is a no-op), or the robot may already be stopped (e.g. rotating in place),
+        // in which case "slowing to 0.00" reflects the rotation, not this check. Throttle a
+        // sustained real slowdown so it doesn't spam once per control cycle.
+        if (linear_vel < prev_linear_vel) {
+          if (linear_vel == 0.0) {
+            RCLCPP_WARN_THROTTLE(
+              logger_, *clock_, 2000,
+              "Collision %.2f m ahead on path: stopping.", integrated_len);
+          } else {
+            RCLCPP_WARN_THROTTLE(
+              logger_, *clock_, 2000,
+              "Collision %.2f m ahead on path: slowing to %.2f m/s.",
+              integrated_len, linear_vel);
+          }
         }
 
         geometry_msgs::msg::PoseStamped collision_pose_global;
