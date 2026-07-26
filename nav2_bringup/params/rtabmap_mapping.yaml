@@ -34,7 +34,15 @@
       Mem/BadSignaturesIgnored: "true"
       Mem/ImageKept: "true"
       Mem/NotLinkedNodesKept: "false"
-      Mem/RawDescriptorsKept: "false"
+      # Mem/RawDescriptorsKept is deliberately left at its default of true.
+      # ThorDrive's ini set it to false, but that makes the resulting database
+      # unloadable in localization mode: mapping leaves a handful of dangling
+      # word references (~15 out of ~39000), Mem/InitWMWithAllNodes makes a
+      # single one of those condemn the whole dictionary, and RTAB-Map then
+      # tries to rebuild it from the per-node descriptors this parameter
+      # suppresses -- so Memory::loadDataFromDb asserts and the node aborts
+      # (SIGABRT, distinct from the empty-database SIGSEGV). Keeping the
+      # descriptors lets that repair succeed silently, for +5% database size.
       Mem/ReduceGraph: "true"
       Mem/SaveDepth16Format: "true"
       RGBD/AggressiveLoopThr: "0.01"
