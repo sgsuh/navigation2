@@ -142,7 +142,7 @@ if(BUILD_TESTING)
   add_subdirectory(src/costmap_filters)
   add_subdirectory(src/error_codes)
   add_subdirectory(src/rtabmap)
-  install(DIRECTORY maps models DESTINATION share/${PROJECT_NAME})
+  install(DIRECTORY maps models worlds DESTINATION share/${PROJECT_NAME})
 endif()
 
 ament_package()

@@ -25,8 +25,8 @@ which is the fixture test_rtabmap_localization consumes.
 
 Runs with use_rgbd:=False because there is no synthetic camera: static fake
 images would produce meaningless visual features and bogus loop closures. The
-map-topic and QoS wiring under test is identical either way, but note that the
-RGB-D path itself is therefore not covered here.
+map-topic and QoS wiring under test is identical either way. The RGB-D path is
+covered by test_rtabmap_visual, which runs in Gazebo for that reason.
 """
 
 import os
