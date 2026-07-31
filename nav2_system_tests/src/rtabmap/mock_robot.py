@@ -72,6 +72,12 @@ def mock_robot_nodes() -> list:
                 # RTAB-Map, not the simulator, must provide map -> odom.
                 'publish_map_odom_tf': False,
                 'publish_clock': False,
+                # This node is started directly rather than through
+                # loopback_simulation.launch.py, so it does not pick up that file's
+                # enable_stamped_cmd_vel argument -- and the test nodes drive it with
+                # unstamped Twist. A mismatch here is silent: the topic simply carries
+                # two types, nothing connects, and the robot never moves.
+                'enable_stamped_cmd_vel': False,
                 'base_frame_id': 'base_link',
                 'scan_frame_id': 'base_scan',
                 'scan_range_max': 10.0,

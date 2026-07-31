@@ -108,6 +108,10 @@ def generate_launch_description():
                     'bt_xml_file': bt_navigator_xml,
                     'use_composition': 'False',
                     'autostart': 'True',
+                    # This tester publishes cmd_vel_teleop and subscribes to cmd_vel as
+                    # TwistStamped, so it needs the stack in stamped mode -- which is no longer
+                    # the default. Keeping it here also keeps the stamped path covered.
+                    'enable_stamped_cmd_vel': 'True',
                 }.items(),
             ),
         ]

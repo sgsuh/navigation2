@@ -18,7 +18,7 @@
 import math
 import sys
 
-from geometry_msgs.msg import PoseWithCovarianceStamped, TwistStamped
+from geometry_msgs.msg import PoseWithCovarianceStamped, Twist
 from nav2_msgs.msg import Costmap
 from nav_msgs.msg import OccupancyGrid
 import rclpy
@@ -53,7 +53,7 @@ class RtabmapTester(Node):
 
         self.initialpose_pub = self.create_publisher(
             PoseWithCovarianceStamped, 'initialpose', 10)
-        self.cmd_pub = self.create_publisher(TwistStamped, 'cmd_vel', 10)
+        self.cmd_pub = self.create_publisher(Twist, 'cmd_vel', 10)
 
         self.create_subscription(LaserScan, 'scan', self.scans.append, SENSOR)
         self.create_subscription(OccupancyGrid, 'map', self.maps.append, LATCHED)
@@ -95,12 +95,11 @@ class RtabmapTester(Node):
         self.initialpose_pub.publish(msg)
 
     def drive(self, lin: float, ang: float, seconds: float) -> None:
-        msg = TwistStamped()
-        msg.twist.linear.x = lin
-        msg.twist.angular.z = ang
+        msg = Twist()
+        msg.linear.x = lin
+        msg.angular.z = ang
         end = self.get_clock().now().nanoseconds + seconds * 1e9
         while rclpy.ok() and self.get_clock().now().nanoseconds < end:
-            msg.header.stamp = self.get_clock().now().to_msg()
             self.cmd_pub.publish(msg)
             rclpy.spin_once(self, timeout_sec=0.05)
 

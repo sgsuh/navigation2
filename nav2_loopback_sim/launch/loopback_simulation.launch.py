@@ -19,6 +19,7 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import LifecycleNode
+from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description() -> LaunchDescription:
@@ -36,6 +37,19 @@ def generate_launch_description() -> LaunchDescription:
         default_value='base_scan',
     )
 
+    # Must agree with the Nav2 stack driving this simulator: whoever publishes cmd_vel and
+    # whoever subscribes to it have to pick the same message type, and ROS 2 gives no
+    # warning when they do not -- the topic simply carries two types and nothing connects.
+    # nav2_bringup's navigation_launch.py declares the same argument with the same default.
+    enable_stamped_cmd_vel = ParameterValue(
+        LaunchConfiguration('enable_stamped_cmd_vel'), value_type=bool)
+    declare_enable_stamped_cmd_vel_cmd = DeclareLaunchArgument(
+        'enable_stamped_cmd_vel',
+        default_value='False',
+        description='Whether cmd_vel is geometry_msgs/TwistStamped (True) or the unstamped '
+                    'geometry_msgs/Twist (False)',
+    )
+
     loopback_sim_cmd = LifecycleNode(
         package='nav2_loopback_sim',
         executable='loopback_simulator',
@@ -44,11 +58,13 @@ def generate_launch_description() -> LaunchDescription:
         output='screen',
         autostart=True,
         parameters=[params_file, {'scan_frame_id': scan_frame_id,
-                                  'use_sim_time': True}],
+                                  'use_sim_time': True,
+                                  'enable_stamped_cmd_vel': enable_stamped_cmd_vel}],
     )
 
     ld = LaunchDescription()
     ld.add_action(declare_scan_frame_id_cmd)
+    ld.add_action(declare_enable_stamped_cmd_vel_cmd)
     ld.add_action(declare_params_file_cmd)
     ld.add_action(loopback_sim_cmd)
     return ld

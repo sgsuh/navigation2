@@ -42,6 +42,7 @@ def generate_launch_description() -> LaunchDescription:
     use_keepout_zones = LaunchConfigAsBool('use_keepout_zones')
     use_speed_zones = LaunchConfigAsBool('use_speed_zones')
     robot_base_frame = LaunchConfiguration('robot_base_frame')
+    enable_stamped_cmd_vel = LaunchConfigAsBool('enable_stamped_cmd_vel')
 
     lifecycle_nodes = [
         'controller_server',
@@ -116,6 +117,18 @@ def generate_launch_description() -> LaunchDescription:
                     'collision_monitor and docking_server look the robot pose up in',
     )
 
+    # Every cmd_vel producer and consumer in this launch file has to agree, and so does
+    # anything driving them (nav2_loopback_sim declares the same argument). ROS 2 does not
+    # warn when a publisher and a subscriber pick different types for one topic name -- the
+    # topic just carries both and nothing connects. The default is unstamped because that is
+    # what the ros_gz bridge configs shipped by nav2_minimal_tb*_sim subscribe to.
+    declare_enable_stamped_cmd_vel_cmd = DeclareLaunchArgument(
+        'enable_stamped_cmd_vel',
+        default_value='False',
+        description='Whether cmd_vel is geometry_msgs/TwistStamped (True) or the unstamped '
+                    'geometry_msgs/Twist (False)',
+    )
+
     declare_params_file_cmd = DeclareLaunchArgument(
         'params_file',
         default_value=os.path.join(bringup_dir, 'params', 'nav2_params.yaml'),
@@ -175,6 +188,7 @@ def generate_launch_description() -> LaunchDescription:
         condition=IfCondition(PythonExpression(['not ', use_composition])),
         actions=[
             SetParameter('use_sim_time', use_sim_time),
+            SetParameter('enable_stamped_cmd_vel', enable_stamped_cmd_vel),
             PushROSNamespace(namespace=namespace),
             Node(
                 package='nav2_controller',
@@ -314,6 +328,7 @@ def generate_launch_description() -> LaunchDescription:
         condition=IfCondition(use_composition),
         actions=[
             SetParameter('use_sim_time', use_sim_time),
+            SetParameter('enable_stamped_cmd_vel', enable_stamped_cmd_vel),
             PushROSNamespace(namespace=namespace),
             LoadComposableNodes(
                 target_container=container_name_full,
@@ -432,6 +447,7 @@ def generate_launch_description() -> LaunchDescription:
     ld.add_action(declare_namespace_cmd)
     ld.add_action(declare_use_sim_time_cmd)
     ld.add_action(declare_robot_base_frame_cmd)
+    ld.add_action(declare_enable_stamped_cmd_vel_cmd)
     ld.add_action(declare_params_file_cmd)
     ld.add_action(declare_autostart_cmd)
     ld.add_action(declare_graph_file_cmd)
