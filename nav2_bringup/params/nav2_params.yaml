@@ -5,7 +5,8 @@ amcl:
     alpha3: 0.2
     alpha4: 0.2
     alpha5: 0.2
-    base_frame_id: "base_footprint"
+    # Overridden by the launch argument robot_base_frame (default base_link).
+    base_frame_id: "base_link"
     beam_skip_distance: 0.5
     beam_skip_error_threshold: 0.9
     beam_skip_threshold: 0.3
@@ -519,7 +520,8 @@ velocity_smoother:
 collision_monitor:
   ros__parameters:
     enabled: true
-    base_frame_id: "base_footprint"
+    # Overridden by the launch argument robot_base_frame (default base_link).
+    base_frame_id: "base_link"
     odom_frame_id: "odom"
     cmd_vel_in_topic: "cmd_vel_smoothed"
     cmd_vel_out_topic: "cmd_vel"
@@ -604,6 +606,10 @@ docking_server:
 
 loopback_simulator:
   ros__parameters:
+    # NOT driven by the robot_base_frame launch argument, unlike every other base frame
+    # in this file: the simulator *publishes* odom -> base_frame_id, so this has to name
+    # the root link of the robot description robot_state_publisher is given -- which is
+    # base_footprint on the TB3 waffle but base_link on the TB4.
     base_frame_id: "base_footprint"
     odom_frame_id: "odom"
     map_frame_id: "map"

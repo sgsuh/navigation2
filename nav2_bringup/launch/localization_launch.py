@@ -40,17 +40,21 @@ def generate_launch_description() -> LaunchDescription:
     container_name_full = (namespace, '/', container_name)
     use_respawn = LaunchConfigAsBool('use_respawn')
     log_level = LaunchConfiguration('log_level')
+    robot_base_frame = LaunchConfiguration('robot_base_frame')
 
     lifecycle_nodes = ['map_server', 'amcl']
 
     # Map fully qualified names to relative ones so the node's namespace can be prepended.
     remappings = [('/tf', 'tf'), ('/tf_static', 'tf_static')]
 
+    # amcl looks odom -> base up in this frame; it publishes only map -> odom.
+    frame_substitutions = {'base_frame_id': robot_base_frame}
+
     configured_params = ParameterFile(
         RewrittenYaml(
             source_file=params_file,
             root_key=namespace,
-            param_rewrites={},
+            param_rewrites=frame_substitutions,
             convert_types=True,
         ),
         allow_substs=True,
@@ -72,6 +76,12 @@ def generate_launch_description() -> LaunchDescription:
         'use_sim_time',
         default_value='false',
         description='Use simulation (Gazebo) clock if true',
+    )
+
+    declare_robot_base_frame_cmd = DeclareLaunchArgument(
+        'robot_base_frame',
+        default_value='base_link',
+        description="The robot base frame amcl localizes, i.e. amcl's base_frame_id",
     )
 
     declare_params_file_cmd = DeclareLaunchArgument(
@@ -252,6 +262,7 @@ def generate_launch_description() -> LaunchDescription:
     ld.add_action(declare_namespace_cmd)
     ld.add_action(declare_map_yaml_cmd)
     ld.add_action(declare_use_sim_time_cmd)
+    ld.add_action(declare_robot_base_frame_cmd)
     ld.add_action(declare_params_file_cmd)
     ld.add_action(declare_autostart_cmd)
     ld.add_action(declare_use_composition_cmd)

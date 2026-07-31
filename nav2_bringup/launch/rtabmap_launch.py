@@ -140,9 +140,10 @@ def generate_launch_description() -> LaunchDescription:
 
     declare_frame_id_cmd = DeclareLaunchArgument(
         'frame_id', default_value='base_link',
-        description='Robot base frame. Must match the costmaps robot_base_frame '
-                    '(base_link in nav2_params.yaml); note that AMCL, which this '
-                    'replaces, uses base_footprint instead'
+        description='Robot base frame. RTAB-Map looks odom -> frame_id up to get its '
+                    'odometry, so this must name the frame the robot publishes odometry '
+                    'against. bringup_launch.py feeds its robot_base_frame argument in '
+                    'here, which keeps it equal to the costmaps robot_base_frame'
     )
 
     declare_odom_frame_id_cmd = DeclareLaunchArgument(

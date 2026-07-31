@@ -41,6 +41,7 @@ def generate_launch_description() -> LaunchDescription:
     log_level = LaunchConfiguration('log_level')
     use_keepout_zones = LaunchConfigAsBool('use_keepout_zones')
     use_speed_zones = LaunchConfigAsBool('use_speed_zones')
+    robot_base_frame = LaunchConfiguration('robot_base_frame')
 
     lifecycle_nodes = [
         'controller_server',
@@ -59,8 +60,16 @@ def generate_launch_description() -> LaunchDescription:
     # Map fully qualified names to relative ones so the node's namespace can be prepended.
     remappings = [('/tf', 'tf'), ('/tf_static', 'tf_static')]
 
-    # Create our own temporary YAML files that include substitutions
-    param_substitutions = {'autostart': autostart}
+    # Create our own temporary YAML files that include substitutions.
+    # Every node here only looks the robot pose up in the base frame -- none of them
+    # publish it -- so they can all be driven from the one robot_base_frame argument,
+    # under whichever parameter name each of them uses.
+    param_substitutions = {
+        'autostart': autostart,
+        'robot_base_frame': robot_base_frame,  # costmaps, bt_navigator, behavior_server
+        'base_frame_id': robot_base_frame,  # collision_monitor
+        'base_frame': robot_base_frame,  # docking_server
+    }
 
     yaml_substitutions = {
         'KEEPOUT_ZONE_ENABLED': use_keepout_zones,
@@ -98,6 +107,13 @@ def generate_launch_description() -> LaunchDescription:
         'use_sim_time',
         default_value='false',
         description='Use simulation (Gazebo) clock if true',
+    )
+
+    declare_robot_base_frame_cmd = DeclareLaunchArgument(
+        'robot_base_frame',
+        default_value='base_link',
+        description='The robot base frame the costmaps, bt_navigator, behavior_server, '
+                    'collision_monitor and docking_server look the robot pose up in',
     )
 
     declare_params_file_cmd = DeclareLaunchArgument(
@@ -415,6 +431,7 @@ def generate_launch_description() -> LaunchDescription:
     # Declare the launch options
     ld.add_action(declare_namespace_cmd)
     ld.add_action(declare_use_sim_time_cmd)
+    ld.add_action(declare_robot_base_frame_cmd)
     ld.add_action(declare_params_file_cmd)
     ld.add_action(declare_autostart_cmd)
     ld.add_action(declare_graph_file_cmd)

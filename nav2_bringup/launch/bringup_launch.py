@@ -50,6 +50,7 @@ def generate_launch_description() -> LaunchDescription:
     use_localization = LaunchConfigAsBool('use_localization')
     use_keepout_zones = LaunchConfigAsBool('use_keepout_zones')
     use_speed_zones = LaunchConfigAsBool('use_speed_zones')
+    robot_base_frame = LaunchConfiguration('robot_base_frame')
 
     # Map fully qualified names to relative ones so the node's namespace can be prepended.
     remappings = [('/tf', 'tf'), ('/tf_static', 'tf_static')]
@@ -59,11 +60,20 @@ def generate_launch_description() -> LaunchDescription:
         'SPEED_ZONE_ENABLED': use_speed_zones,
     }
 
+    # One argument drives every node that only *looks up* the robot base frame, under
+    # whichever name that node's parameter happens to use. The frames a node *publishes*
+    # are deliberately not rewritten here -- see declare_robot_base_frame_cmd below.
+    frame_substitutions = {
+        'robot_base_frame': robot_base_frame,  # costmaps, bt_navigator, behavior_server
+        'base_frame_id': robot_base_frame,  # amcl, collision_monitor
+        'base_frame': robot_base_frame,  # docking_server
+    }
+
     configured_params = ParameterFile(
         RewrittenYaml(
             source_file=params_file,
             root_key=namespace,
-            param_rewrites={},
+            param_rewrites=frame_substitutions,
             value_rewrites=yaml_substitutions,
             convert_types=True,
         ),
@@ -128,6 +138,19 @@ def generate_launch_description() -> LaunchDescription:
         'use_sim_time',
         default_value='false',
         description='Use simulation (Gazebo) clock if true',
+    )
+
+    # Only the frames the stack *reads* are driven from here. nav2_loopback_sim's own
+    # base_frame_id is excluded on purpose: it *publishes* odom -> <base_frame_id>, so it
+    # has to match the root link of the simulated robot description (base_footprint on
+    # the TB3 waffle, base_link on the TB4), not the frame the rest of the stack queries.
+    declare_robot_base_frame_cmd = DeclareLaunchArgument(
+        'robot_base_frame',
+        default_value='base_link',
+        description='The robot base frame every node looks the robot pose up in: amcl, '
+                    'the costmaps, bt_navigator, behavior_server, collision_monitor, '
+                    'docking_server and RTAB-Map. Set it to whatever frame the robot '
+                    'actually publishes odometry against',
     )
 
     declare_params_file_cmd = DeclareLaunchArgument(
@@ -217,6 +240,7 @@ def generate_launch_description() -> LaunchDescription:
                     'use_intra_process_comms': use_intra_process_comms,
                     'use_respawn': use_respawn,
                     'container_name': container_name,
+                    'robot_base_frame': robot_base_frame,
                 }.items(),
             ),
 
@@ -235,6 +259,8 @@ def generate_launch_description() -> LaunchDescription:
                     'use_sim_time': use_sim_time,
                     'use_respawn': use_respawn,
                     'log_level': log_level,
+                    # RTAB-Map's own name for the same thing
+                    'frame_id': robot_base_frame,
                 }.items(),
             ),
 
@@ -288,6 +314,7 @@ def generate_launch_description() -> LaunchDescription:
                     'use_keepout_zones': use_keepout_zones,
                     'use_speed_zones': use_speed_zones,
                     'container_name': container_name,
+                    'robot_base_frame': robot_base_frame,
                 }.items(),
             ),
         ]
@@ -308,6 +335,7 @@ def generate_launch_description() -> LaunchDescription:
     ld.add_action(declare_speed_mask_yaml_cmd)
     ld.add_action(declare_graph_file_cmd)
     ld.add_action(declare_use_sim_time_cmd)
+    ld.add_action(declare_robot_base_frame_cmd)
     ld.add_action(declare_params_file_cmd)
     ld.add_action(declare_autostart_cmd)
     ld.add_action(declare_use_composition_cmd)

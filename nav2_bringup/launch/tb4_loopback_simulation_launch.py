@@ -39,6 +39,7 @@ def generate_launch_description() -> LaunchDescription:
     map_yaml_file = LaunchConfiguration('map')
     graph_filepath = LaunchConfiguration('graph')
     params_file = LaunchConfiguration('params_file')
+    robot_base_frame = LaunchConfiguration('robot_base_frame')
     autostart = LaunchConfigAsBool('autostart')
     use_composition = LaunchConfigAsBool('use_composition')
     use_intra_process_comms = LaunchConfigAsBool('use_intra_process_comms')
@@ -66,6 +67,13 @@ def generate_launch_description() -> LaunchDescription:
     declare_graph_file_cmd = DeclareLaunchArgument(
         'graph',
         default_value=os.path.join(bringup_dir, 'graphs', 'depot_graph.geojson'),
+    )
+
+    declare_robot_base_frame_cmd = DeclareLaunchArgument(
+        'robot_base_frame',
+        default_value='base_link',
+        description='The robot base frame the Nav2 stack looks the robot pose up in; '
+                    'forwarded to bringup_launch.py',
     )
 
     declare_params_file_cmd = DeclareLaunchArgument(
@@ -154,6 +162,7 @@ def generate_launch_description() -> LaunchDescription:
             'use_speed_zones': 'False',  # Speed zones not used in loopback simulation
             'use_localization': 'False',  # Don't use SLAM, AMCL
             'container_name': 'nav2_container',
+            'robot_base_frame': robot_base_frame,
         }.items(),
     )
 
@@ -247,6 +256,7 @@ def generate_launch_description() -> LaunchDescription:
     ld.add_action(declare_namespace_cmd)
     ld.add_action(declare_map_yaml_cmd)
     ld.add_action(declare_graph_file_cmd)
+    ld.add_action(declare_robot_base_frame_cmd)
     ld.add_action(declare_params_file_cmd)
     ld.add_action(declare_autostart_cmd)
     ld.add_action(declare_use_composition_cmd)
