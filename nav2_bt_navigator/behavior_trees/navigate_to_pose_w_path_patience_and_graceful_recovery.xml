@@ -1,0 +1,139 @@
+
+<!--
+  A variant of navigate_to_pose_w_replanning_and_recovery.xml that ticks the three ported
+  driving-behavior nodes: StrictRateController, StopSlowly and EscapeInfeasibleArea.
+
+  This tree is OPT-IN. Nothing selects it by default. Select it either per goal, through the
+  NavigateToPose action's `behavior_tree` field, or per robot by pointing bt_navigator's
+  `default_nav_to_pose_bt_xml` parameter at it. It needs `stop_slowly` and
+  `escape_infeasible_area` in behavior_server's `behavior_plugins` (they are registered in
+  both nav2_params.yaml and nav2_params_rpp.yaml).
+
+  Three changes from the upstream tree, each marked PORTED below.
+-->
+<root BTCPP_format="4" main_tree_to_execute="NavigateToPoseWPathPatienceAndGracefulRecovery">
+  <BehaviorTree ID="NavigateToPoseWPathPatienceAndGracefulRecovery">
+    <RecoveryNode number_of_retries="6" name="NavigateRecovery">
+      <PipelineSequence name="NavigateWithReplanning">
+        <ProgressCheckerSelector selected_progress_checker="{selected_progress_checker}" default_progress_checker="progress_checker" topic_name="progress_checker_selector"/>
+        <GoalCheckerSelector selected_goal_checker="{selected_goal_checker}" default_goal_checker="general_goal_checker" topic_name="goal_checker_selector"/>
+        <PathHandlerSelector selected_path_handler="{selected_path_handler}" default_path_handler="PathHandler" topic_name="path_handler_selector"/>
+        <ControllerSelector selected_controller="{selected_controller}" default_controller="FollowPath" topic_name="controller_selector"/>
+        <PlannerSelector selected_planner="{selected_planner}" default_planner="GridBased" topic_name="planner_selector"/>
+        <RateController hz="1.0">
+          <RecoveryNode number_of_retries="1" name="ComputePathToPose">
+            <Fallback name="FallbackComputePathToPose">
+              <ReactiveSequence name="CheckIfNewPathNeeded">
+                <Inverter>
+                  <GlobalUpdatedGoal/>
+                </Inverter>
+                <IsGoalNearby path="{path}" proximity_threshold="4.0" max_robot_pose_search_dist="1.5"/>
+                <TruncatePathLocal input_path="{path}" output_path="{remaining_path}" distance_forward="-1" distance_backward="0.0" />
+                <!--
+                  PORTED (1/3): path patience.
+
+                  Upstream calls ValidatePath once per RateController period and replans the
+                  moment it reports the path invalid, so a person stepping across the path for
+                  a second throws the whole path away. Here an invalid path is tolerated for a
+                  bounded window first.
+
+                  StrictRateController is what makes that window a wall-clock duration rather
+                  than a count of service round trips: unlike RateController it does NOT
+                  re-tick a RUNNING child between periods, so ValidatePath's response is only
+                  harvested on a period boundary, and each RetryUntilSuccessful attempt
+                  therefore costs one full period. Window is roughly num_attempts / hz seconds
+                  -> 4 s below.
+
+                  Note the two rate gates serialise. While the path stays valid it is
+                  re-checked about every 1/RateController.hz + 1/StrictRateController.hz
+                  seconds (~2 s here) rather than upstream's ~1 s. Raise StrictRateController's
+                  hz to shrink that, but the patience window shrinks with it.
+                -->
+                <RetryUntilSuccessful num_attempts="4">
+                  <StrictRateController hz="1.0">
+                    <ValidatePath path="{remaining_path}"/>
+                  </StrictRateController>
+                </RetryUntilSuccessful>
+              </ReactiveSequence>
+              <ComputePathToPose goal="{goal}" path="{path}" planner_id="{selected_planner}" error_code_id="{compute_path_error_code}" error_msg="{compute_path_error_msg}"/>
+            </Fallback>
+            <Sequence>
+              <WouldAPlannerRecoveryHelp error_code="{compute_path_error_code}"/>
+              <ClearEntireCostmap name="ClearGlobalCostmap-Context" service_name="global_costmap/clear_entirely_global_costmap"/>
+            </Sequence>
+          </RecoveryNode>
+        </RateController>
+        <RecoveryNode number_of_retries="1" name="FollowPath">
+          <FollowPath path="{path}" controller_id="{selected_controller}" error_code_id="{follow_path_error_code}" error_msg="{follow_path_error_msg}" tracking_feedback="{tracking_feedback}"/>
+          <Sequence>
+            <WouldAControllerRecoveryHelp error_code="{follow_path_error_code}"/>
+            <ClearEntireCostmap name="ClearLocalCostmap-Context" service_name="local_costmap/clear_entirely_local_costmap"/>
+          </Sequence>
+        </RecoveryNode>
+      </PipelineSequence>
+      <Sequence>
+        <Fallback>
+          <WouldAControllerRecoveryHelp error_code="{follow_path_error_code}"/>
+          <WouldAPlannerRecoveryHelp error_code="{compute_path_error_code}"/>
+          <!--
+            PORTED (2/3): let a start-pose-occupied failure reach the recovery branch.
+
+            WouldAPlannerRecoveryHelp lists only UNKNOWN, NO_VALID_PATH and TIMEOUT, so
+            ComputePathToPose failing with START_OCCUPIED (205) - the robot's own centre being
+            inside the inflated band, which is exactly what EscapeInfeasibleArea exists to fix
+            - makes the stock tree return FAILURE without ever entering recovery. Adding 205
+            here is what makes the escape below reachable at all.
+          -->
+          <AreErrorCodesPresent name="IsStartPoseOccupied" error_code="{compute_path_error_code}" error_codes_to_check="205"/>
+        </Fallback>
+        <ReactiveFallback name="RecoveryFallback">
+          <GoalUpdated/>
+          <Sequence name="GracefulRecovery">
+            <!--
+              PORTED (3/3a): come to a controlled stop before recovering.
+
+              The controller's output is otherwise simply cut when FollowPath fails.
+              is_recovery is left false on purpose: this is a preparatory stop, not a recovery
+              attempt, and counting it would double every entry in the number_of_recoveries
+              reported back through NavigateToPose feedback.
+            -->
+            <StopSlowly name="GracefulStop" max_distance="1.5" desired_deceleration="0.3" consider_collision="true" is_recovery="false" error_code_id="{stop_slowly_error_code}" error_msg="{stop_slowly_error_msg}"/>
+            <RoundRobin name="RecoveryActions">
+              <Sequence name="ClearingActions">
+                <ClearEntireCostmap name="ClearLocalCostmap-Subtree" service_name="local_costmap/clear_entirely_local_costmap"/>
+                <ClearEntireCostmap name="ClearGlobalCostmap-Subtree" service_name="global_costmap/clear_entirely_global_costmap"/>
+              </Sequence>
+              <!--
+                PORTED (3/3b): escape, but only when the robot is actually trapped.
+
+                EscapeInfeasibleArea does not check that the robot is stuck before acting - its
+                ALREADY_FREE error code is declared but never returned, and simulatePossibleMovement
+                returns min_distance straight away from free space. Ticked unconditionally it
+                would just be a second BackUp, so it is gated on the planner reporting
+                START_OCCUPIED. The condition failing makes this RoundRobin child fail, which
+                advances to Spin in the same tick.
+
+                avoid_collision is false deliberately. The trigger (centre within robot_radius
+                of a lethal cell) and the runtime guard (footprint in collision) share
+                robot_radius, so with the guard on it fires the instant travel reaches
+                min_distance - measured stopping the escape early at min_distance 0.3 and only
+                completing at 0.42. The behavior already forward-simulates the whole route for
+                collisions before committing to it.
+
+                min_distance is not only the guard's arming distance, it also seeds that
+                simulation, so raising it raises the distance the robot ends up driving.
+              -->
+              <Sequence name="EscapeIfTrapped">
+                <AreErrorCodesPresent name="IsStartPoseOccupied-Escape" error_code="{compute_path_error_code}" error_codes_to_check="205"/>
+                <EscapeInfeasibleArea min_distance="0.1" max_distance="1.0" speed="0.1" prioritize_backup="true" avoid_collision="false" collision_avoidance_is_failure="true" time_allowance="15.0" is_recovery="true" error_code_id="{escape_infeasible_area_error_code}" error_msg="{escape_infeasible_area_error_msg}"/>
+              </Sequence>
+              <Spin spin_dist="1.57" error_code_id="{spin_error_code}" error_msg="{spin_error_msg}"/>
+              <Wait wait_duration="5.0" error_code_id="{wait_error_code}" error_msg="{wait_error_msg}"/>
+              <BackUp backup_dist="0.30" backup_speed="0.15" error_code_id="{backup_error_code}" error_msg="{backup_error_msg}"/>
+            </RoundRobin>
+          </Sequence>
+        </ReactiveFallback>
+      </Sequence>
+    </RecoveryNode>
+  </BehaviorTree>
+</root>
