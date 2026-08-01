@@ -92,7 +92,17 @@ def mock_robot_nodes() -> list:
             name='lifecycle_manager_mock',
             output='screen',
             parameters=[{'node_names': ['map_server', 'loopback_simulator']},
-                        {'autostart': True}],
+                        {'autostart': True},
+                        # Both of these transition in milliseconds, so anything
+                        # close to this means the change_state reply was lost --
+                        # rmw_fastrtps drops it when the server answers before the
+                        # client's response reader has matched. Bounding it well
+                        # under the assertions' own 60 s waits is what puts
+                        # "Failed to change state for node: ..." in the log
+                        # *before* some downstream assertion times out and blames
+                        # the wrong thing. The 120 s default is sized for
+                        # Costmap2DROS activation and would land too late here.
+                        {'transition_timeout': 10.0}],
         ),
         # The laser mounting, normally supplied by the robot's URDF.
         launch_ros.actions.Node(

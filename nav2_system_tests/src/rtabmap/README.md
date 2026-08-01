@@ -31,7 +31,11 @@ alone.
 Both tests must publish an initial pose before anything happens at all:
 `loopback_simulator` creates its scan and odom timers inside the `/initialpose`
 callback, so until a pose arrives it publishes nothing — not even the all-inf
-scan it falls back to when it cannot raycast.
+scan it falls back to when it cannot raycast. Nothing else in either launch
+publishes that topic, so **every wait for a scan has to be pumping the pose
+itself**; one that does not can never be satisfied. `test_rtabmap` had exactly
+that bug and spent a fixed 60 s in it on every run until 2026-08-01, which was
+two thirds of its runtime.
 
 ## What test_rtabmap asserts
 
@@ -160,12 +164,16 @@ at its `camera images` wait rather than somewhere confusing.
   map origin with no `initial_pose`, it recovers the offset to within 3 cm in
   ~1-3 s, and does not relocalise with the camera off or from an unmapped
   place), but that is not automated here.
-- **`test_rtabmap_localization` is intermittently flaky**: observed failing once
-  in four runs (2026-07-26), with RTAB-Map never publishing the stored map, so
-  the test times out waiting for it and then for the global costmap. Not
-  investigated. It is unrelated to `Mem/RawDescriptorsKept` above: these two
-  tests run `use_rgbd:=False`, so the database they build has zero `Feature` and
-  zero `Word` rows and that parameter has nothing to act on.
+- ~~**`test_rtabmap_localization` is intermittently flaky**~~ — **diagnosed
+  2026-08-01, and it was not a fault in these tests.** A `change_state` response
+  was occasionally dropped by the rmw during bringup, and `lifecycle_manager`
+  waited on it with no deadline, so the whole managed set stalled where it stood.
+  Whichever node the stall landed on decided which assertion timed out, which is
+  why the same bug looked like several different flakes: no usable scan, no
+  stored map, or no `costmap_raw`. Fixed by bounding the wait — see the lifecycle
+  bringup notes in the repo's `CLAUDE.md` and
+  `nav2_lifecycle_manager`'s `test_transition_timeout`. If a run here ever hangs
+  in bringup again, grep it for `failed to send response`.
 - Localization accuracy is not checked. The tests confirm that `map` -> `odom`
   is published, not that it is correct — with a perfect simulated odometry
   source there is nothing meaningful for the correction to recover from.

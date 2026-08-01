@@ -113,21 +113,36 @@ def main() -> int:
     #    with finite returns is the single signal that loopback_simulator has
     #    the ground truth map, an initial pose, and the base->laser transform;
     #    until all three hold it publishes an all-inf scan instead of failing.
-    node.wait_for(lambda: len(node.scans) > 0, 60.0, 'the first LaserScan')
-
-    # Keep re-sending the initial pose, throttled: loopback_simulator may not
-    # have been listening yet on the first one, but RTAB-Map subscribes to the
-    # same topic and logs a warning for every pose it gets in mapping mode.
+    #
+    #    The initial pose has to be pumped from the *first* wait, not after it.
+    #    loopback_simulator creates its scan timer inside the /initialpose
+    #    callback and nothing else in this launch publishes that topic, so a wait
+    #    for the first scan that sends no pose cannot ever be satisfied: it used
+    #    to burn its full 60 s on every run, passing or failing, which was most
+    #    of this test's runtime.
     ticks = 0
 
-    def scan_is_valid() -> bool:
+    def pump_initial_pose() -> None:
+        # Throttled, because RTAB-Map subscribes to the same topic and logs a
+        # warning for every pose it gets in mapping mode.
         nonlocal ticks
         if ticks % 20 == 0:
             node.publish_initial_pose()
         ticks += 1
+
+    def got_a_scan() -> bool:
+        pump_initial_pose()
+        return len(node.scans) > 0
+
+    def scan_is_valid() -> bool:
+        pump_initial_pose()
         return node.valid_scan_beams() >= 10
 
-    if not node.wait_for(scan_is_valid, 60.0, 'a LaserScan with finite returns'):
+    if not node.wait_for(got_a_scan, 60.0, 'the first LaserScan'):
+        failures.append('the mock published no LaserScan at all')
+
+    if not failures and not node.wait_for(
+            scan_is_valid, 60.0, 'a LaserScan with finite returns'):
         failures.append(
             'the mock never produced a usable scan, so nothing downstream '
             'could be tested')
