@@ -59,7 +59,8 @@ public:
       {
         BT::InputPort<double>("max_distance", 1.5, "Maximum distance to allow during deceleration"),
         BT::InputPort<double>("desired_deceleration", 0.15, "Desired deceleration"),
-        BT::InputPort<bool>("consider_collision", true, "Whether to lookout for potential collision"),
+        BT::InputPort<bool>(
+          "consider_collision", true, "Whether to lookout for potential collision"),
         BT::InputPort<bool>("is_recovery", false, "True if recovery"),
         BT::OutputPort<ActionResult::_error_code_type>(
           "error_code_id", "The stop slowly behavior server error code"),
