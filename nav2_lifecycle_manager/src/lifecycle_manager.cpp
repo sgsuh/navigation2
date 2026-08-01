@@ -55,6 +55,11 @@ LifecycleManager::LifecycleManager(const rclcpp::NodeOptions & options)
   // 60 s by default. Set to 0 to restore the old unbounded wait.
   double transition_timeout_s = nav2::declare_or_get_parameter(
     node, "transition_timeout", 120.0);
+  // How many extra attempts to make when a transition neither is acknowledged nor
+  // leaves the node in the expected state. Each attempt first re-reads the node's
+  // state, so the common case - reply lost, transition done - costs no re-issue at
+  // all. 0 disables retrying and reports the first failure.
+  transition_retries_ = nav2::declare_or_get_parameter(node, "transition_retries", 3);
   double respawn_timeout_s = nav2::declare_or_get_parameter(
     node, "bond_respawn_max_duration", 10.0);
   attempt_respawn_reconnection_ = nav2::declare_or_get_parameter(
@@ -311,13 +316,65 @@ LifecycleManager::changeStateForNode(const std::string & node_name, std::uint8_t
 {
   message(transition_label_map_[transition] + node_name);
 
-  if (!node_map_[node_name]->change_state(
-      transition, transition_timeout_,
-      service_timeout_) ||
-    !(node_map_[node_name]->get_state(service_timeout_) == transition_state_map_[transition]))
-  {
-    RCLCPP_ERROR(get_logger(), "Failed to change state for node: %s", node_name.c_str());
-    return false;
+  const std::uint8_t target_state = transition_state_map_[transition];
+  // The labels are built to be prefixes of a node name ("Configuring ") and so carry
+  // a trailing space; the messages below read them mid-sentence.
+  std::string label = transition_label_map_[transition];
+  while (!label.empty() && label.back() == ' ') {
+    label.pop_back();
+  }
+
+  // The acknowledgement is not the authority on whether the transition happened; the
+  // node's own state is. A change_state reply can be lost outright while the
+  // transition itself succeeds - rmw_fastrtps drops the response when the server
+  // answers before the client's response reader has matched - so a failed or timed
+  // out call is followed by asking the node where it actually ended up. In every
+  // occurrence seen so far the node was already in the target state and this
+  // recovers on the spot, without re-issuing anything.
+  //
+  // Re-issuing matters only when the request never arrived. Note it cannot simply be
+  // repeated blind: the same transition is invalid from the state it would have
+  // produced, so a node that did make it would reject the retry. Hence the state
+  // check first, retry second.
+  for (int attempt = 0; attempt <= transition_retries_; ++attempt) {
+    bool acknowledged = false;
+    try {
+      acknowledged = node_map_[node_name]->change_state(
+        transition, transition_timeout_, service_timeout_);
+    } catch (const std::runtime_error & e) {
+      RCLCPP_WARN(
+        get_logger(), "No reply to the %s transition of %s: %s",
+        label.c_str(), node_name.c_str(), e.what());
+    }
+
+    std::uint8_t current_state = State::PRIMARY_STATE_UNKNOWN;
+    try {
+      current_state = node_map_[node_name]->get_state(service_timeout_);
+    } catch (const std::runtime_error & e) {
+      RCLCPP_WARN(
+        get_logger(), "Could not read the state of %s: %s", node_name.c_str(), e.what());
+    }
+
+    if (current_state == target_state) {
+      if (!acknowledged) {
+        RCLCPP_WARN(
+          get_logger(),
+          "%s did not acknowledge its %s transition but is in the expected state; "
+          "the reply was lost, continuing.",
+          node_name.c_str(), label.c_str());
+      }
+      break;
+    }
+
+    if (attempt == transition_retries_) {
+      RCLCPP_ERROR(get_logger(), "Failed to change state for node: %s", node_name.c_str());
+      return false;
+    }
+
+    RCLCPP_WARN(
+      get_logger(), "Retrying the %s transition of %s (attempt %d of %d)",
+      label.c_str(), node_name.c_str(),
+      attempt + 2, transition_retries_ + 1);
   }
 
   if (transition == Transition::TRANSITION_ACTIVATE) {

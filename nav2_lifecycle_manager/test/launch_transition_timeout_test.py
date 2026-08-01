@@ -14,10 +14,12 @@
 # limitations under the License.
 
 """
-Bring up a lifecycle manager with a deliberately short `transition_timeout`.
+Two lifecycle managers, both with a deliberately short `transition_timeout`.
 
-The managed node's configure transition takes far longer than that, so the manager
-has to give up and report the failure. See test_transition_timeout.cpp.
+Their managed nodes both sit in on_configure for longer than that, so neither
+transition is acknowledged in time. They differ in whether the node reaches the
+target state while the manager is still checking: one must be given up on, the
+other must be recovered from. See test_transition_timeout.cpp.
 """
 
 import os
@@ -44,7 +46,24 @@ def generate_launch_description():
                     # Far below the node's configure duration, so the bound is what
                     # decides the outcome rather than the transition finishing.
                     {'transition_timeout': 1.0},
+                    # Retrying cannot help this one -- the node is still busy -- so
+                    # leave it off and keep the test to the bound it is about.
+                    {'transition_retries': 0},
                     {'node_names': ['slow_lifecycle_node']},
+                ],
+            ),
+            Node(
+                package='nav2_lifecycle_manager',
+                executable='lifecycle_manager',
+                name='lifecycle_manager_recover_test',
+                output='screen',
+                parameters=[
+                    {'use_sim_time': False},
+                    {'autostart': False},
+                    {'bond_timeout': 0.0},
+                    {'transition_timeout': 1.0},
+                    {'transition_retries': 3},
+                    {'node_names': ['recovering_lifecycle_node']},
                 ],
             ),
         ]

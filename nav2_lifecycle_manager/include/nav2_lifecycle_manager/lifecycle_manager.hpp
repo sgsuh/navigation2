@@ -269,6 +269,8 @@ protected:
   std::chrono::milliseconds service_timeout_;
   /// Upper bound on waiting for a change_state response; 0 or less waits forever
   std::chrono::milliseconds transition_timeout_;
+  /// Extra attempts at a transition that neither replied nor reached the target state
+  int transition_retries_;
   double bond_heartbeat_period_;
 
   // A map of all nodes to check bond connection
