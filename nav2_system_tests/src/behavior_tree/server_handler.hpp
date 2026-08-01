@@ -37,6 +37,8 @@
 #include "nav2_msgs/action/compute_path_through_poses.hpp"
 #include "nav2_msgs/action/compute_route.hpp"
 #include "nav2_msgs/action/smooth_path.hpp"
+#include "nav2_msgs/action/stop_slowly.hpp"
+#include "nav2_msgs/action/escape_infeasible_area.hpp"
 
 #include "geometry_msgs/msg/point_stamped.hpp"
 
@@ -73,14 +75,37 @@ public:
     }
   }
 
+  /**
+   * @brief Choose which error code a failed goal reports.
+   *
+   * Which one it is decides whether the failure reaches a tree's recovery branch at
+   * all: WouldAPlannerRecoveryHelp accepts only UNKNOWN, NO_VALID_PATH and TIMEOUT, so
+   * START_OCCUPIED has to be selected explicitly to exercise a tree that handles it.
+   */
+  void setFailureErrorCode(uint16_t error_code, const std::string & error_msg)
+  {
+    failure_error_code_ = error_code;
+    failure_error_msg_ = error_msg;
+  }
+
+  void reset() override
+  {
+    failure_error_code_ = nav2_msgs::action::ComputePathToPose::Result::TIMEOUT;
+    failure_error_msg_ = "Timeout";
+    DummyActionServer::reset();
+  }
+
 protected:
   void updateResultForFailure(
     std::shared_ptr<nav2_msgs::action::ComputePathToPose::Result>
     & result) override
   {
-    result->error_code = nav2_msgs::action::ComputePathToPose::Result::TIMEOUT;
-    result->error_msg = "Timeout";
+    result->error_code = failure_error_code_;
+    result->error_msg = failure_error_msg_;
   }
+
+  uint16_t failure_error_code_{nav2_msgs::action::ComputePathToPose::Result::TIMEOUT};
+  std::string failure_error_msg_{"Timeout"};
 };
 
 class DummyFollowPathActionServer : public DummyActionServer<nav2_msgs::action::FollowPath>
@@ -96,6 +121,39 @@ protected:
   {
     result->error_code = nav2_msgs::action::FollowPath::Result::NO_VALID_CONTROL;
     result->error_msg = "No valid control";
+  }
+};
+
+class DummyStopSlowlyActionServer : public DummyActionServer<nav2_msgs::action::StopSlowly>
+{
+public:
+  explicit DummyStopSlowlyActionServer(const rclcpp::Node::SharedPtr & node)
+  : DummyActionServer(node, "stop_slowly") {}
+
+protected:
+  void updateResultForFailure(
+    std::shared_ptr<nav2_msgs::action::StopSlowly::Result>
+    & result) override
+  {
+    result->error_code = nav2_msgs::action::StopSlowly::Result::TF_ERROR;
+    result->error_msg = "TF error";
+  }
+};
+
+class DummyEscapeInfeasibleAreaActionServer
+  : public DummyActionServer<nav2_msgs::action::EscapeInfeasibleArea>
+{
+public:
+  explicit DummyEscapeInfeasibleAreaActionServer(const rclcpp::Node::SharedPtr & node)
+  : DummyActionServer(node, "escape_infeasible_area") {}
+
+protected:
+  void updateResultForFailure(
+    std::shared_ptr<nav2_msgs::action::EscapeInfeasibleArea::Result>
+    & result) override
+  {
+    result->error_code = nav2_msgs::action::EscapeInfeasibleArea::Result::NO_ESCAPE_ROUTE;
+    result->error_msg = "No escape route";
   }
 };
 
@@ -199,6 +257,8 @@ public:
   std::unique_ptr<DummyActionServer<nav2_msgs::action::Spin>> spin_server;
   std::unique_ptr<DummyActionServer<nav2_msgs::action::Wait>> wait_server;
   std::unique_ptr<DummyActionServer<nav2_msgs::action::BackUp>> backup_server;
+  std::unique_ptr<DummyStopSlowlyActionServer> stop_slowly_server;
+  std::unique_ptr<DummyEscapeInfeasibleAreaActionServer> escape_infeasible_area_server;
   std::unique_ptr<DummyActionServer<nav2_msgs::action::ComputeRoute>> compute_route_server;
   std::unique_ptr<DummyActionServer<nav2_msgs::action::SmoothPath>> smoother_server;
   std::unique_ptr<DummyActionServer<nav2_msgs::action::DriveOnHeading>> drive_on_heading_server;

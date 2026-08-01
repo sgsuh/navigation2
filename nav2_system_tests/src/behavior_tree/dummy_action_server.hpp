@@ -67,7 +67,7 @@ public:
     running_ranges_ = runningRanges;
   }
 
-  void reset()
+  virtual void reset()
   {
     failure_ranges_.clear();
     running_ranges_.clear();

@@ -1165,6 +1165,186 @@ TEST_F(BehaviorTreeTestFixture, TestRecoverySubtreeGoalUpdated)
   EXPECT_EQ(server_handler->backup_server->getGoalCount(), 0);
 }
 
+/**
+ * The remaining tests cover navigate_to_pose_w_path_patience_and_graceful_recovery.xml,
+ * the opt-in tree that ticks the ported StopSlowly and EscapeInfeasibleArea behaviors.
+ *
+ * Its third addition, the StrictRateController path-patience gate, is not reachable from
+ * here: this fixture publishes no transform, so IsGoalNearby fails and CheckIfNewPathNeeded
+ * short-circuits before ValidatePath on every cycle, exactly as it does for the upstream
+ * tree. The decorator's semantics are covered decisively by the unit test in
+ * nav2_behavior_tree/test/plugins/decorator/test_strict_rate_controller.cpp instead.
+ */
+static std::filesystem::path gracefulRecoveryTree()
+{
+  return std::filesystem::path(
+    nav2::get_package_share_directory("nav2_bt_navigator")
+  ) / "behavior_trees" / "navigate_to_pose_w_path_patience_and_graceful_recovery.xml";
+}
+
+/**
+ * Test scenario:
+ *
+ * ComputePathToPose and FollowPath return SUCCESS, so the recovery branch never runs.
+ * Neither ported behavior should be reached.
+ */
+TEST_F(BehaviorTreeTestFixture, TestGracefulRecoveryTreeAllSuccess)
+{
+  const auto bt_file = gracefulRecoveryTree();
+  std::vector<std::string> search_directories = {bt_file.parent_path().string()};
+
+  EXPECT_EQ(bt_handler->loadBehaviorTree(bt_file.string(), search_directories), true);
+
+  BT::NodeStatus result = BT::NodeStatus::RUNNING;
+  while (result == BT::NodeStatus::RUNNING) {
+    result = bt_handler->tree.tickOnce();
+    std::this_thread::sleep_for(10ms);
+  }
+
+  EXPECT_EQ(result, BT::NodeStatus::SUCCESS);
+
+  EXPECT_EQ(server_handler->compute_path_to_pose_server->getGoalCount(), 1);
+  EXPECT_EQ(server_handler->follow_path_server->getGoalCount(), 1);
+
+  // The ported behaviors sit entirely inside the recovery branch
+  EXPECT_EQ(server_handler->stop_slowly_server->getGoalCount(), 0);
+  EXPECT_EQ(server_handler->escape_infeasible_area_server->getGoalCount(), 0);
+  EXPECT_EQ(server_handler->spin_server->getGoalCount(), 0);
+  EXPECT_EQ(server_handler->wait_server->getGoalCount(), 0);
+  EXPECT_EQ(server_handler->backup_server->getGoalCount(), 0);
+}
+
+/**
+ * Test scenario:
+ *
+ * The same inputs as TestNavigateRecoverySimple, which enters the recovery branch exactly
+ * once and takes the ClearingActions arm of the RoundRobin. StopSlowly runs ahead of that
+ * arm, so it is called once; EscapeInfeasibleArea is gated on a planner START_OCCUPIED that
+ * never happens here, so it is not.
+ */
+TEST_F(BehaviorTreeTestFixture, TestGracefulRecoveryTreeStopsSlowlyBeforeRecovering)
+{
+  const auto bt_file = gracefulRecoveryTree();
+  std::vector<std::string> search_directories = {bt_file.parent_path().string()};
+
+  EXPECT_EQ(bt_handler->loadBehaviorTree(bt_file.string(), search_directories), true);
+
+  Ranges plannerFailureRange;
+  plannerFailureRange.emplace_back(Range(0, 1));
+  server_handler->compute_path_to_pose_server->setFailureRanges(plannerFailureRange);
+
+  Ranges controllerFailureRange;
+  controllerFailureRange.emplace_back(Range(0, 3));
+  server_handler->follow_path_server->setFailureRanges(controllerFailureRange);
+
+  BT::NodeStatus result = BT::NodeStatus::RUNNING;
+  while (result == BT::NodeStatus::RUNNING) {
+    result = bt_handler->tree.tickOnce();
+    std::this_thread::sleep_for(10ms);
+  }
+
+  EXPECT_EQ(result, BT::NodeStatus::SUCCESS);
+
+  // Recovery branch was entered once, so the graceful stop ran once
+  EXPECT_EQ(server_handler->stop_slowly_server->getGoalCount(), 1);
+
+  // and the escape stayed gated off
+  EXPECT_EQ(server_handler->escape_infeasible_area_server->getGoalCount(), 0);
+  EXPECT_EQ(server_handler->spin_server->getGoalCount(), 0);
+  EXPECT_EQ(server_handler->wait_server->getGoalCount(), 0);
+  EXPECT_EQ(server_handler->backup_server->getGoalCount(), 0);
+}
+
+/**
+ * Test scenario:
+ *
+ * ComputePathToPose fails with START_OCCUPIED, i.e. the robot's own pose is what makes
+ * planning impossible.
+ *
+ * This is the case the upstream tree cannot handle at all: WouldAPlannerRecoveryHelp does
+ * not list START_OCCUPIED, so the recovery branch is never entered and navigation just
+ * fails. Here the extra AreErrorCodesPresent gate lets it through, and the second arm of
+ * the RoundRobin runs EscapeInfeasibleArea.
+ */
+TEST_F(BehaviorTreeTestFixture, TestGracefulRecoveryTreeEscapesWhenStartOccupied)
+{
+  const auto bt_file = gracefulRecoveryTree();
+  std::vector<std::string> search_directories = {bt_file.parent_path().string()};
+
+  EXPECT_EQ(bt_handler->loadBehaviorTree(bt_file.string(), search_directories), true);
+
+  Ranges failureRange;
+  failureRange.emplace_back(Range(0, 100));
+  server_handler->compute_path_to_pose_server->setFailureRanges(failureRange);
+  server_handler->compute_path_to_pose_server->setFailureErrorCode(
+    nav2_msgs::action::ComputePathToPose::Result::START_OCCUPIED, "Start occupied");
+
+  BT::NodeStatus result = BT::NodeStatus::RUNNING;
+  while (result == BT::NodeStatus::RUNNING) {
+    result = bt_handler->tree.tickOnce();
+    std::this_thread::sleep_for(10ms);
+  }
+
+  // Planning never succeeds, so navigation still fails - but only after recovering
+  EXPECT_EQ(result, BT::NodeStatus::FAILURE);
+
+  // What bounds the run is the RoundRobin, not NavigateRecovery's 6 retries: RoundRobin
+  // defaults to wrap_around=false and returns FAILURE as soon as its index runs off the
+  // end, even when the last child succeeded. So the recovery branch is entered once per
+  // RoundRobin arm - five here - and StopSlowly, which sits ahead of the RoundRobin,
+  // runs once per entry.
+  EXPECT_EQ(server_handler->stop_slowly_server->getGoalCount(), 5);
+
+  // RoundRobin arm 2 of 5, reached on the second recovery
+  EXPECT_EQ(server_handler->escape_infeasible_area_server->getGoalCount(), 1);
+  EXPECT_EQ(server_handler->spin_server->getGoalCount(), 1);
+  EXPECT_EQ(server_handler->wait_server->getGoalCount(), 1);
+  EXPECT_EQ(server_handler->backup_server->getGoalCount(), 1);
+}
+
+/**
+ * Test scenario:
+ *
+ * The same repeated planning failure, but reported as TIMEOUT rather than START_OCCUPIED.
+ *
+ * EscapeInfeasibleArea does not check whether the robot is trapped before acting - its
+ * ALREADY_FREE error code is never returned and simulatePossibleMovement returns
+ * min_distance straight away from free space - so an ungated tick would just be a second
+ * BackUp. The gate must therefore skip it, and the RoundRobin must fall through to Spin
+ * within the same recovery entry: the tree then performs exactly the recovery actions the
+ * upstream tree would, one entry earlier than the trapped case above.
+ */
+TEST_F(BehaviorTreeTestFixture, TestGracefulRecoveryTreeSkipsEscapeWhenNotTrapped)
+{
+  const auto bt_file = gracefulRecoveryTree();
+  std::vector<std::string> search_directories = {bt_file.parent_path().string()};
+
+  EXPECT_EQ(bt_handler->loadBehaviorTree(bt_file.string(), search_directories), true);
+
+  Ranges failureRange;
+  failureRange.emplace_back(Range(0, 100));
+  server_handler->compute_path_to_pose_server->setFailureRanges(failureRange);
+
+  BT::NodeStatus result = BT::NodeStatus::RUNNING;
+  while (result == BT::NodeStatus::RUNNING) {
+    result = bt_handler->tree.tickOnce();
+    std::this_thread::sleep_for(10ms);
+  }
+
+  EXPECT_EQ(result, BT::NodeStatus::FAILURE);
+
+  // One entry fewer than the trapped case: the escape arm is consumed without costing a
+  // recovery entry of its own, because Spin runs in the same tick the gate fails
+  EXPECT_EQ(server_handler->stop_slowly_server->getGoalCount(), 4);
+
+  // The decisive assertion: the escape is skipped, and the recovery actions that do run
+  // are exactly the ones the upstream tree would have run
+  EXPECT_EQ(server_handler->escape_infeasible_area_server->getGoalCount(), 0);
+  EXPECT_EQ(server_handler->spin_server->getGoalCount(), 1);
+  EXPECT_EQ(server_handler->wait_server->getGoalCount(), 1);
+  EXPECT_EQ(server_handler->backup_server->getGoalCount(), 1);
+}
+
 }  // namespace nav2_system_tests
 
 int main(int argc, char ** argv)

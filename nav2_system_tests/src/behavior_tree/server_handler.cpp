@@ -51,6 +51,8 @@ ServerHandler::ServerHandler()
     node_, "wait");
   backup_server = std::make_unique<DummyActionServer<nav2_msgs::action::BackUp>>(
     node_, "backup");
+  stop_slowly_server = std::make_unique<DummyStopSlowlyActionServer>(node_);
+  escape_infeasible_area_server = std::make_unique<DummyEscapeInfeasibleAreaActionServer>(node_);
   compute_route_server = std::make_unique<DummyActionServer<nav2_msgs::action::ComputeRoute>>(
     node_, "compute_route");
   smoother_server = std::make_unique<DummyActionServer<nav2_msgs::action::SmoothPath>>(
@@ -105,6 +107,8 @@ void ServerHandler::reset() const
   spin_server->reset();
   wait_server->reset();
   backup_server->reset();
+  stop_slowly_server->reset();
+  escape_infeasible_area_server->reset();
   drive_on_heading_server->reset();
 }
 
