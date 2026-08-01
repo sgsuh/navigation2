@@ -44,6 +44,17 @@ LifecycleManager::LifecycleManager(const rclcpp::NodeOptions & options)
   autostart_ = nav2::declare_or_get_parameter(node, "autostart", false);
   double bond_timeout_s = nav2::declare_or_get_parameter(node, "bond_timeout", 4.0);
   double service_timeout_s = nav2::declare_or_get_parameter(node, "service_timeout", 5.0);
+  // Upper bound on how long to wait for a change_state *response*. `service_timeout`
+  // only bounds discovery of the service, not the reply, and the reply can be lost
+  // outright: rmw_fastrtps drops it when the server answers before the client's
+  // response reader has matched, logging "failed to send response to
+  // <node>/change_state (timeout): client will not receive response". Waiting forever
+  // for a reply that will never come deadlocks bringup on this thread, so bound it and
+  // report the failure instead. Must stay above the slowest legitimate transition -
+  // Costmap2DROS::on_activate alone blocks for up to its `initial_transform_timeout`,
+  // 60 s by default. Set to 0 to restore the old unbounded wait.
+  double transition_timeout_s = nav2::declare_or_get_parameter(
+    node, "transition_timeout", 120.0);
   double respawn_timeout_s = nav2::declare_or_get_parameter(
     node, "bond_respawn_max_duration", 10.0);
   attempt_respawn_reconnection_ = nav2::declare_or_get_parameter(
@@ -56,6 +67,8 @@ LifecycleManager::LifecycleManager(const rclcpp::NodeOptions & options)
     std::chrono::duration<double>(bond_timeout_s));
   service_timeout_ = std::chrono::duration_cast<std::chrono::milliseconds>(
     std::chrono::duration<double>(service_timeout_s));
+  transition_timeout_ = std::chrono::duration_cast<std::chrono::milliseconds>(
+    std::chrono::duration<double>(transition_timeout_s));
   bond_respawn_max_duration_ = rclcpp::Duration::from_seconds(respawn_timeout_s);
 
   callback_group_ = create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive, false);
@@ -299,7 +312,7 @@ LifecycleManager::changeStateForNode(const std::string & node_name, std::uint8_t
   message(transition_label_map_[transition] + node_name);
 
   if (!node_map_[node_name]->change_state(
-      transition, std::chrono::milliseconds(-1),
+      transition, transition_timeout_,
       service_timeout_) ||
     !(node_map_[node_name]->get_state(service_timeout_) == transition_state_map_[transition]))
   {

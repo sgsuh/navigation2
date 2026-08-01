@@ -17,6 +17,27 @@ nav2_add_test(test_lifecycle
     TEST_EXECUTABLE=$<TARGET_FILE:test_lifecycle_gtest>
 )
 
+ament_add_gtest_executable(test_transition_timeout_gtest
+  test_transition_timeout.cpp
+)
+target_link_libraries(test_transition_timeout_gtest
+  ${library_name}
+  nav2_util::nav2_util_core
+  rclcpp::rclcpp
+  rclcpp_lifecycle::rclcpp_lifecycle
+)
+
+nav2_add_test(test_transition_timeout
+  GENERATE_RESULT_FOR_RETURN_CODE_ZERO
+  COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/launch_transition_timeout_test.py"
+  WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
+  # The managed node's configure blocks for 8 s; the manager must give up after 1 s.
+  # A regression to the unbounded wait shows up as a failed assertion well inside this.
+  TIMEOUT 40
+  ENV
+    TEST_EXECUTABLE=$<TARGET_FILE:test_transition_timeout_gtest>
+)
+
 ament_add_gtest_executable(test_bond_gtest
   test_bond.cpp
 )
