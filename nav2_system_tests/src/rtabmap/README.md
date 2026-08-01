@@ -174,6 +174,21 @@ at its `camera images` wait rather than somewhere confusing.
   bringup notes in the repo's `CLAUDE.md` and
   `nav2_lifecycle_manager`'s `test_transition_timeout`. If a run here ever hangs
   in bringup again, grep it for `failed to send response`.
+- **A second, unrelated flake is still open**: RTAB-Map loads the database and logs
+  `2D occupancy grid map loaded (WxH)` but then publishes no grid, so the map wait
+  times out with `RTAB-Map published no usable map` (localization) or `published no
+  OccupancyGrid on 'map'` (mapping). Seen with no lifecycle involvement at all — no
+  dropped `change_state` reply, no manager error — which is what separates it from
+  the bringup deadlock that used to produce the same symptom. The one lead so far is
+  a single `Could not convert laser scan msg! Aborting rtabmap update...` a second or
+  two before the drive starts. First recorded 2026-07-26, still not diagnosed.
+
+  **Do not try to gate the drive on RTAB-Map's `info` topic.** It was tried on
+  2026-08-01 and deadlocks: `info` carries one message per *processed frame*, and
+  RTAB-Map does not process frames while the robot is standing still, so waiting for
+  it before driving waits forever. Any readiness signal here has to be one that a
+  stationary robot can satisfy.
+
 - Localization accuracy is not checked. The tests confirm that `map` -> `odom`
   is published, not that it is correct — with a perfect simulated odometry
   source there is nothing meaningful for the correction to recover from.

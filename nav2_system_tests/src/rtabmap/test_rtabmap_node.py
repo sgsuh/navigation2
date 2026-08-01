@@ -113,6 +113,30 @@ def main() -> int:
     #    with finite returns is the single signal that loopback_simulator has
     #    the ground truth map, an initial pose, and the base->laser transform;
     #    until all three hold it publishes an all-inf scan instead of failing.
+    #
+    #    This wait cannot succeed and always spends its full 60 s: nothing here
+    #    publishes /initialpose yet, and loopback_simulator creates its scan timer
+    #    inside that callback. It is therefore a settling period that happens to be
+    #    spelled as a wait, and it is left in place deliberately.
+    #
+    #    Removing it on 2026-08-01 cut the test to ~26 s and was reverted, but the
+    #    reasoning that prompted the revert did not survive: the failures blamed on
+    #    it -- RTAB-Map loading the database and then publishing no grid -- turned
+    #    up again in a clean 14-run batch with this wait fully in place, with no
+    #    dropped lifecycle reply anywhere near them. That is a separate, older bug
+    #    (README, "Known gaps"), not a consequence of the timing. Measured rates,
+    #    all small: 2/16 with it removed, 1/30 with it present.
+    #
+    #    So the revert is precaution, not proof. What is certain is only that
+    #    without it the drive starts ~3 s after bringup instead of ~60 s. Settling
+    #    this properly needs a clean A/B of ~30 runs per arm; until someone does
+    #    that, do not remove it casually.
+    #
+    #    If you do try again: the replacement has to be a readiness signal a
+    #    *stationary* robot can satisfy. RTAB-Map's `info` topic is not one -- it
+    #    carries one message per processed frame and RTAB-Map does not process
+    #    frames while the robot is still, so gating on it deadlocks (tried, see
+    #    README).
     node.wait_for(lambda: len(node.scans) > 0, 60.0, 'the first LaserScan')
 
     # Keep re-sending the initial pose, throttled: loopback_simulator may not
