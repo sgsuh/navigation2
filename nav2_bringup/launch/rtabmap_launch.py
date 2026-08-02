@@ -223,7 +223,12 @@ def generate_launch_description() -> LaunchDescription:
                         'publish_tf': True,
                         'tf_publish_period': 0.033,
                         'tf_tolerance': 0.1,
-                        'wait_for_transform': 0.1,
+                        # Upstream's own default (rtabmap.launch.py). At the 0.1
+                        # this used to carry, the first scan after bringup can
+                        # reach RTAB-Map before odom->base_link spans the scan
+                        # interval, and convertScanMsg() fails. That failure is
+                        # now merely a dropped frame, but it is still noise.
+                        'wait_for_transform': 0.2,
                         'odom_tf_linear_variance': 0.001,
                         'odom_tf_angular_variance': 0.01,
                         # Sensor inputs. No rtabmap_odom node runs in this

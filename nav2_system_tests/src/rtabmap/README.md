@@ -174,14 +174,40 @@ at its `camera images` wait rather than somewhere confusing.
   bringup notes in the repo's `CLAUDE.md` and
   `nav2_lifecycle_manager`'s `test_transition_timeout`. If a run here ever hangs
   in bringup again, grep it for `failed to send response`.
-- **A second, unrelated flake is still open**: RTAB-Map loads the database and logs
-  `2D occupancy grid map loaded (WxH)` but then publishes no grid, so the map wait
-  times out with `RTAB-Map published no usable map` (localization) or `published no
-  OccupancyGrid on 'map'` (mapping). Seen with no lifecycle involvement at all — no
-  dropped `change_state` reply, no manager error — which is what separates it from
-  the bringup deadlock that used to produce the same symptom. The one lead so far is
-  a single `Could not convert laser scan msg! Aborting rtabmap update...` a second or
-  two before the drive starts. First recorded 2026-07-26, still not diagnosed.
+- ~~**A second, unrelated flake is still open**~~ — **diagnosed and fixed 2026-08-02,
+  and it was not a fault in these tests either.** RTAB-Map loaded the database, logged
+  `2D occupancy grid map loaded (WxH)`, and then published no grid, so the map wait
+  timed out with `RTAB-Map published no usable map` (localization) or `published no
+  OccupancyGrid on 'map'` (mapping).
+
+  **`CoreWrapper::commonLaserScanCallback` leaked `syncDataMutex_` on its error
+  return.** The block is guarded by `syncTimer_->is_canceled() &&
+  syncDataMutex_.lockTry() == 0`, and `UMutex::lockTry()` is `pthread_mutex_trylock`,
+  so 0 means *acquired*; the `return` taken when `convertScanMsg` fails skipped the
+  single `unlock()` at the end of the block. One unconvertible scan therefore
+  disabled the node's data path permanently — every later scan found the mutex held
+  and skipped the block. Fixed in the `rtabmap_ros` fork (`740e6f5`).
+
+  **The tell is a single `Could not convert laser scan msg! Aborting rtabmap
+  update...` followed by silence**, plus RTAB-Map ignoring SIGINT *and* SIGTERM at
+  teardown and exiting `-9`. Only the TF republisher survives, which is why
+  `map -> odom` is still present and the node looks alive. If the error appears
+  **more than once** in a log you are on a fixed build and looking at something else.
+
+  The trigger is a startup TF race: the first scans after bringup reach RTAB-Map before
+  `odom -> base_link` spans the scan interval. `wait_for_transform` was raised from 0.1
+  to upstream's own 0.2 default, but **that is not a fix and cannot be one** — one run
+  of the post-fix batch hit the race for real and it lasted **1.2 s**, seven scans, far
+  longer than any per-lookup timeout would cover. That run then processed 33 frames and
+  passed. Releasing the mutex is what makes the trigger survivable; on a real robot any
+  transient TF gap would have wedged RTAB-Map the same way.
+
+  To reproduce it deterministically rather than waiting for the race, put a
+  republisher between `loopback_simulator` and RTAB-Map — point the node at it with
+  `scan_topic:=<relay>` — and rewrite `header.frame_id` to a frame that is in no TF
+  tree for the first N scans. **The discriminator is the error count, not pass/fail:**
+  a leaked mutex can only log the error a couple of times, and processes nothing
+  afterwards. (The harness used here lives in this repo's gitignored `.claude/flake7/`.)
 
   **Do not try to gate the drive on RTAB-Map's `info` topic.** It was tried on
   2026-08-01 and deadlocks: `info` carries one message per *processed frame*, and
