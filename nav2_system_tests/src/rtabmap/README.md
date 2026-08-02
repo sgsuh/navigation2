@@ -121,9 +121,17 @@ at its `camera images` wait rather than somewhere confusing.
 
 ## Gotchas found while writing these
 
-- **RTAB-Map segfaults if started in localization mode against an empty or
-  missing database** (exit code -11, no diagnostic). Always map first. This is
-  upstream behaviour, not something the launch files guard against.
+- **Localization mode against a database with no map in it does not crash — it
+  comes up silently and publishes nothing.** Re-measured 2026-08-02 on 0.23.8;
+  the earlier note here (exit -11, no diagnostic) did not reproduce in any form.
+  A *missing* path makes RTAB-Map create a fresh database and log
+  `Localization mode (Mem/IncrementalMemory=false)` exactly like a healthy run;
+  a valid but nodeless database behaves the same; only a *zero-byte* file aborts,
+  and it names the reason (`no such table: Node`). The silent cases are the
+  dangerous ones: nothing reaches `map`, so StaticLayer stays empty and
+  `map -> odom` is never corrected. `rtabmap_launch.py` now checks the database
+  before starting the node (`check_localization_database`) and refuses, so this
+  is no longer unguarded. Still: always map first.
 - **`Mem/RawDescriptorsKept` must stay at its default of `true`.** With it set
   to `false`, mapping produces a database that localization mode cannot open at
   all: it aborts on load with `Memory.cpp:526 Condition (!descriptors.empty())
@@ -143,14 +151,28 @@ at its `camera images` wait rather than somewhere confusing.
 - **`/localization_pose` is published even when RTAB-Map has not relocalised**,
   because `pub_loc_pose_only_when_localizing` defaults false. Its presence
   proves nothing; check the `map` -> `odom` value instead.
-- **A database built in mapping mode carries its parameters with it.** On load
-  RTAB-Map logs `Update RTAB-Map parameter "RGBD/LinearUpdate"="0.2" from
-  database` and similar, overriding the corresponding values in
-  `rtabmap_localization.yaml`. `Mem/IncrementalMemory` still comes from the
-  YAML, so the mode itself is unaffected, but the localization-specific
-  tuning of `RGBD/AngularUpdate`, `RGBD/LinearUpdate`,
-  `RGBD/ProximityPath*` and `Rtabmap/StartNewMapOnLoopClosure` is not what
-  ends up running.
+- **A database built in mapping mode carries its parameters with it — but it
+  cannot override the YAML.** On load RTAB-Map logs
+  `Update RTAB-Map parameter "RGBD/LinearUpdate"="0.2" from database` and
+  similar, and it is tempting to read that as the database winning. It is not:
+  CoreWrapper only inserts a database value when the key is absent from
+  `parameters_` (`CoreWrapper.cpp:540`), and rosparams are parsed well before
+  (`:369`). **The trap is silence, not override** — a profile inherits the
+  mapping run's value for every key it leaves out.
+
+  Measured across every localization run in the flake batches: exactly four keys
+  were ever restored — `RGBD/LinearUpdate`, `RGBD/AngularUpdate`,
+  `Rtabmap/StartNewMapOnLoopClosure` and `Kp/MaxFeatures` — and they are exactly
+  the four `rtabmap_localization.yaml` did not name. `RGBD/ProximityPath*` *is*
+  named there and was never restored, so contrary to an earlier note here, it
+  does take effect. All four are now pinned in that file and the count is zero.
+
+  `Kp/MaxFeatures` is the one with teeth: CoreWrapper forces it to -1 —
+  bag-of-words disabled — whenever a run has no image subscription
+  (`CoreWrapper.cpp:791-801`), and that value goes into the database. Localize
+  with a camera against a map built lidar-only and the database would restore
+  -1, silently disabling visual loop closure, because the forcing branch only
+  runs when there is *no* camera so nothing puts it back.
 
 ## Known gaps
 

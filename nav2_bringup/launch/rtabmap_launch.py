@@ -30,14 +30,78 @@ any lifecycle manager's ``node_names``.
 """
 
 import os
+import sqlite3
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, GroupAction
+from launch.actions import (
+    DeclareLaunchArgument, EmitEvent, GroupAction, LogInfo, OpaqueFunction,
+)
+from launch.events import Shutdown
 from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node, PushROSNamespace, SetParameter
 from launch_ros.parameter_descriptions import ParameterValue
 from nav2_common.launch import LaunchConfigAsBool
+
+
+def check_localization_database(context, *args, load_nodes=None, **kwargs):
+    """Gate the RTAB-Map node on localization mode having a map to localize against.
+
+    Returns `load_nodes` when the database is usable and a shutdown instead when
+    it is not. The node is returned from here rather than added alongside this
+    check so that a rejected run never starts the process at all -- an
+    EmitEvent(Shutdown) added next to the node still lets it spawn and be killed
+    a moment later.
+
+    RTAB-Map does not complain about this. Pointed at a path that does not
+    exist it creates a fresh database and comes up in localization mode against
+    an empty graph -- measured: it logs `Localization mode
+    (Mem/IncrementalMemory=false)` like any healthy run and leaves a 106 KB file
+    behind. Nothing is ever published on `map`, so nav2's StaticLayer stays
+    empty and `map -> odom` is never corrected, and the only symptom is a robot
+    that cannot navigate. A database that exists but holds no nodes behaves the
+    same way. A zero-byte file is the one case RTAB-Map does catch, aborting
+    with `no such table: Node`, which is at least legible but still a crash.
+
+    Failing here instead costs one sqlite query and names the actual problem.
+    The check is deliberately one-sided: anything it cannot read confidently is
+    allowed through, so a schema change upstream degrades to today's behaviour
+    rather than blocking a working setup.
+    """
+    if context.perform_substitution(LaunchConfiguration('rtabmap_mode')) != 'localization':
+        return [load_nodes]
+
+    path = os.path.expanduser(
+        context.perform_substitution(LaunchConfiguration('rtabmap_db')))
+
+    if not os.path.exists(path):
+        problem = 'does not exist'
+    elif os.path.getsize(path) == 0:
+        problem = 'is empty (0 bytes)'
+    else:
+        try:
+            con = sqlite3.connect(f'file:{path}?mode=ro', uri=True)
+            try:
+                nodes = con.execute('SELECT count(*) FROM Node').fetchone()[0]
+            finally:
+                con.close()
+        except sqlite3.Error:
+            # Unreadable or an unfamiliar schema: not confidently wrong, so let
+            # RTAB-Map have it and report whatever it finds.
+            return [load_nodes]
+        if nodes:
+            return [load_nodes]
+        problem = 'contains no map nodes'
+
+    return [
+        LogInfo(msg=f'rtabmap_launch: refusing to start localization mode -- '
+                    f'the database {path} {problem}. Localization needs a map '
+                    f'built by a mapping run; RTAB-Map would otherwise come up '
+                    f'silently against an empty graph and publish no map at '
+                    f'all. Map first with rtabmap_mode:=mapping rtabmap_args:=-d, '
+                    f'or point rtabmap_db at an existing database.'),
+        EmitEvent(event=Shutdown(reason='no RTAB-Map database to localize against')),
+    ]
 
 
 def generate_launch_description() -> LaunchDescription:
@@ -290,5 +354,8 @@ def generate_launch_description() -> LaunchDescription:
     ld.add_action(declare_camera_info_topic_cmd)
     ld.add_action(declare_odom_topic_cmd)
     ld.add_action(declare_sensor_data_qos_cmd)
-    ld.add_action(load_nodes)
+    # load_nodes is returned by the check rather than added here, so a rejected
+    # database never starts the node at all.
+    ld.add_action(OpaqueFunction(
+        function=check_localization_database, kwargs={'load_nodes': load_nodes}))
     return ld

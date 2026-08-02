@@ -9,9 +9,47 @@
 # which was GUI state irrelevant to the ROS node. It is deliberately not used
 # directly: RTAB-Map rewrites its ini config on every clean shutdown, which
 # would keep dirtying this file with machine-specific absolute paths.
+#
+# "Only parameters that differ from the default" has one exception, the block
+# marked PINNED below. A database restores its own parameters on load, but only
+# for keys this file does NOT set: CoreWrapper merges the database's parameters
+# under `parameters_.find(key) == parameters_.end()` (CoreWrapper.cpp:540), and
+# rosparams are parsed first (:369) -- so YAML always wins and silence is what
+# lets a value leak in from whatever the mapping run happened to write. Anything
+# whose localization value must not depend on how the map was built therefore has
+# to be stated here even when it equals the default.
 /**:
   rtabmap:
     ros__parameters:
+      # --- PINNED: stated so the database cannot supply them. ---
+      # Measured: without these four, every localization run logged exactly
+      # `Update RTAB-Map parameter "X"="Y" from database` for them and nothing
+      # else -- four lines, every run. With them, zero.
+      #
+      # 0 = "update the map even when not moving" (Parameters.h:374-375). Mapping
+      # uses 0.2 to keep the graph small while driving, which is a reason that does
+      # not exist in a read-only session; gating on travel means a robot that boots
+      # mis-localised and stands still never attempts to recover.
+      # REASONED, NOT MEASURED. 0 and 0.2 were compared on the loopback pair and
+      # made no observable difference: a stationary robot processes exactly one
+      # frame and publishes the cached grid either way. That is expected --
+      # loopback odometry is perfect, so a still robot is *exactly* still and
+      # neither threshold is ever crossed. Attributing these two needs real
+      # odometry noise, i.e. Gazebo or the robot.
+      RGBD/AngularUpdate: "0"
+      RGBD/LinearUpdate: "0"
+      # RTAB-Map's own default. Mapping sets it true; a read-only localization
+      # session should never start a new map, whatever built the database.
+      Rtabmap/StartNewMapOnLoopClosure: "false"
+      # RTAB-Map's own default. CoreWrapper forces -1 (bag-of-words disabled) when
+      # a run has no image subscription (CoreWrapper.cpp:791-801) and writes that
+      # into the database, so a database built lidar-only would otherwise disable
+      # visual loop closure on an RGB-D localization run -- silently, because the
+      # forcing branch only executes when there is no camera, so nothing puts it
+      # back. Stating the default is a no-op without a camera (CoreWrapper re-forces
+      # -1) and a fix with one.
+      Kp/MaxFeatures: "500"
+      # --- end PINNED ---
       Grid/3D: "false"
       Grid/MaxGroundAngle: "5"
       Grid/MaxGroundHeight: "0.05"
