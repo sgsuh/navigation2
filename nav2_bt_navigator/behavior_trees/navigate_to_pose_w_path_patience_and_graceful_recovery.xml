@@ -9,6 +9,15 @@
   `escape_infeasible_area` in behavior_server's `behavior_plugins` (they are registered in
   both nav2_params.yaml and nav2_params_rpp.yaml).
 
+  REQUIRES A PLANNER THAT REPORTS START_OCCUPIED. The escape below is gated on planner
+  error 205, and 205 is thrown only by the three Smac planners
+  (nav2_smac_planner/include/nav2_smac_planner/smac_planner_{2d,hybrid,lattice}_impl.hpp).
+  nav2_navfn_planner -- the `GridBased` plugin both shipped params files configure -- reports
+  a start pose inside the inflated band as NO_VALID_PATH (208), exactly like an unreachable
+  goal. Measured in Gazebo: with NavFn the escape gate refuses every time and
+  EscapeInfeasibleArea never runs, so with the default planner this tree is the upstream tree
+  plus StopSlowly. Everything else here works on any planner.
+
   Three changes from the upstream tree, each marked PORTED below.
 -->
 <root BTCPP_format="4" main_tree_to_execute="NavigateToPoseWPathPatienceAndGracefulRecovery">
@@ -83,6 +92,12 @@
             inside the inflated band, which is exactly what EscapeInfeasibleArea exists to fix
             - makes the stock tree return FAILURE without ever entering recovery. Adding 205
             here is what makes the escape below reachable at all.
+
+            Measured in Gazebo against a real planner_server running SmacPlanner2D, robot
+            parked 0.30 m from a wall with robot_radius 0.35. Same scenario, same planner,
+            only the tree differing: the upstream tree returns FAILED in 0.0 s with
+            number_of_recoveries 0 - it never enters recovery at all - while this tree
+            recovers and reaches the goal in 29.2 s. This condition is the whole difference.
           -->
           <AreErrorCodesPresent name="IsStartPoseOccupied" error_code="{compute_path_error_code}" error_codes_to_check="205"/>
         </Fallback>

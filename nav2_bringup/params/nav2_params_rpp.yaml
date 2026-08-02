@@ -74,6 +74,14 @@ bt_navigator:
     # StrictRateController decorator are ticked by no shipped tree. To use them, either
     # uncomment the line below or pass the tree per goal in NavigateToPose's
     # `behavior_tree` field. Like every other ported feature here it ships off.
+    #
+    # Note before enabling it: that tree gates EscapeInfeasibleArea on planner error
+    # START_OCCUPIED (205), which ONLY the Smac planners throw. `GridBased` below is
+    # NavfnPlanner, which reports a blocked start pose as NO_VALID_PATH (208), so the
+    # escape can never fire on this profile as configured -- verified in Gazebo, the
+    # gate refuses and the behavior never runs. StopSlowly and StrictRateController
+    # work regardless. Switch GridBased to nav2_smac_planner::SmacPlanner2D if the
+    # escape is the reason you are enabling the tree.
     # default_nav_to_pose_bt_xml: $(find-pkg-share nav2_bt_navigator)/behavior_trees/navigate_to_pose_w_path_patience_and_graceful_recovery.xml
 
     # plugin_lib_names is used to add custom BT plugins to the executor (vector of strings).
